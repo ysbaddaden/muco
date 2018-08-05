@@ -2,21 +2,21 @@
 
 CC = clang-5.0
 CFLAGS = -O3 -std=gnu11 -Iinclude -Isrc -Wall -Wextra -Wpedantic
-LDFLAGS = -latomic ./libcoro.a
-OBJECTS = src/fiber.o src/scheduler.o src/deque.o
+LDFLAGS = -latomic ./libmuco.a
+OBJECTS = src/muco.o
 
-all: libcoro.a
+all: libmuco.a
 
-libcoro.a: $(OBJECTS)
-	$(AR) -cr libcoro.a $(OBJECTS)
+libmuco.a: $(OBJECTS)
+	$(AR) -cr libmuco.a $(OBJECTS)
 
-main: samples/main.o libcoro.a
+main: samples/main.o libmuco.a
 	$(CC) samples/main.o -o main $(LDFLAGS)
 
-switch: samples/switch.o libcoro.a
+switch: samples/switch.o libmuco.a
 	$(CC) samples/switch.o -o switch $(LDFLAGS)
 
 clean: .phony
-	rm -f libcoro.a src/*.o samples/*.o main switch
+	rm -f libmuco.a src/*.o samples/*.o main switch
 
 .phony:

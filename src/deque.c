@@ -3,12 +3,9 @@
  * Deque Implementation" published in June 1999 by Robert D. Blumote, C. Greg
  * Plaxton, Sandip Ray.
  */
-#include "config.h"
 #include "deque.h"
 
-#define DEQUE_SIZE (sizeof(void*) * 1024 * 1024)
-
-void deque_initialize(deque_t *self) {
+static void deque_initialize(deque_t *self) {
     struct age age = {0, 0};
     atomic_init(&self->bot, 0);
     atomic_init(&self->age, age);
@@ -25,18 +22,18 @@ void deque_initialize(deque_t *self) {
     self->deq = buf;
 }
 
-void deque_finalize(deque_t *self) {
+static void deque_finalize(deque_t *self) {
     munmap(self->deq, DEQUE_SIZE);
 }
 
-void deque_push_bottom(deque_t *self, void *item) {
+static void deque_push_bottom(deque_t *self, void *item) {
     int bot = atomic_load((int *)&self->bot);
     self->deq[bot] = item;
     bot += 1;
     atomic_store((int *)&self->bot, bot);
 }
 
-void *deque_pop_bottom(deque_t *self) {
+static void *deque_pop_bottom(deque_t *self) {
     struct age old_age, new_age;
     void *item;
     int bot;
@@ -67,7 +64,7 @@ void *deque_pop_bottom(deque_t *self) {
     return NULL;
 }
 
-void *deque_pop_top(deque_t *self) {
+__attribute__((__unused__)) static void *deque_pop_top(deque_t *self) {
     struct age old_age, new_age;
     void *item;
     int bot;

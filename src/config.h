@@ -1,5 +1,5 @@
-#ifndef CO_CONFIG_H
-#define CO_CONFIG_H
+#ifndef CONFIG_H
+#define CONFIG_H
 
 #ifndef _BSD_SOURCE
 #define _BSD_SOURCE
@@ -12,12 +12,10 @@
 #include <sys/mman.h>
 #include <ucontext.h>
 
-#define CO_STACK_PROT (PROT_READ | PROT_WRITE)
-#define CO_STACK_MAP (MAP_ANONYMOUS | MAP_PRIVATE | MAP_STACK)
-#define CO_STACK_FD (-1)
-#define CO_STACK_OFFSET (0)
-#define CO_STACK_SIZE (SIGSTKSZ)
-
-#define thread_local _Thread_local
+#define STACK_PROT (PROT_READ | PROT_WRITE)
+#define STACK_MAP (MAP_ANONYMOUS | MAP_PRIVATE | MAP_STACK)
+#define STACK_FD (-1)
+#define STACK_OFFSET (0)
+#define STACK_SIZE (SIGSTKSZ)
 
 #endif

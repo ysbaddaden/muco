@@ -2,7 +2,7 @@
 #define STACK_H
 
 static inline void stack_allocate(stack_t *stack, size_t size) {
-    void *sp = mmap(NULL, size, CO_STACK_PROT, CO_STACK_MAP, CO_STACK_FD, CO_STACK_OFFSET);
+    void *sp = mmap(NULL, size, STACK_PROT, STACK_MAP, STACK_FD, STACK_OFFSET);
     if (sp == MAP_FAILED) {
         error(1, errno, "mmap");
     }
