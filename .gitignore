@@ -1,0 +1,6 @@
+a.out
+*.o
+*.a
+*.gch
+/main
+/switch
