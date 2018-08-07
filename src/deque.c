@@ -7,6 +7,7 @@
 
 static void deque_initialize(deque_t *self) {
     struct age age = {0, 0};
+
     atomic_init(&self->bot, 0);
     atomic_init(&self->age, age);
 
@@ -27,27 +28,25 @@ static void deque_finalize(deque_t *self) {
 }
 
 static void deque_push_bottom(deque_t *self, void *item) {
-    int bot = atomic_load((int *)&self->bot);
+    int bot = self->bot;
     self->deq[bot] = item;
-    bot += 1;
-    atomic_store((int *)&self->bot, bot);
+    self->bot = bot + 1;
 }
 
 static void *deque_pop_bottom(deque_t *self) {
     struct age old_age, new_age;
     void *item;
-    int bot;
 
-    bot = atomic_load((int *)&self->bot);
+    int bot = self->bot;
     if (bot == 0) {
         return NULL;
     }
 
     bot -= 1;
-    atomic_store((int *)&self->bot, bot);
+    self->bot = bot;
 
     item = self->deq[bot];
-    old_age = atomic_load((struct age *)&self->age);
+    old_age = self->age;
     if (bot > old_age.top) {
         return item;
     }
@@ -60,17 +59,17 @@ static void *deque_pop_bottom(deque_t *self) {
             return item;
         }
     }
-    atomic_store((struct age *)&self->age, new_age);
+    self->age = new_age;
     return NULL;
 }
 
-__attribute__((__unused__)) static void *deque_pop_top(deque_t *self) {
+static void *deque_pop_top(deque_t *self) {
     struct age old_age, new_age;
     void *item;
     int bot;
 
-    old_age = atomic_load((struct age *)&self->age);
-    bot = atomic_load((int *)&self->bot);
+    old_age = self->age;
+    bot = self->bot;
 
     if (bot <= old_age.top) {
         return NULL;

@@ -2,10 +2,21 @@
 #define DEQUE_H
 
 #include "config.h"
-#include "muco/deque.h"
+#include <stdatomic.h>
+
+struct age {
+    int tag;
+    int top;
+};
+
+typedef struct deque {
+    atomic_int bot;
+    _Atomic struct age age;
+    void **deq;
+} deque_t;
 
 // FIXME: should be unlimited
-#define DEQUE_SIZE (sizeof(void *) * 1024 * 1024)
+#define DEQUE_SIZE (4UL * 1024 * 1024 * 1024)
 
 static void deque_initialize(deque_t *self);
 static void deque_finalize(deque_t *self);

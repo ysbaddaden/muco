@@ -1,9 +1,9 @@
 .POSIX:
 
 CC = clang-5.0
-CFLAGS = -O3 -std=gnu11 -Iinclude -Isrc -Wall -Wextra -Wpedantic
-LDFLAGS = -latomic ./libmuco.a
-OBJECTS = src/muco.o
+CFLAGS = -g -O3 -std=gnu11 -Iinclude -Isrc -Wall -Wextra -Wpedantic $(DEF)
+LDFLAGS = -latomic -lpthread ./libmuco.a
+OBJECTS = src/muco.o src/pcg_basic.o
 
 all: libmuco.a
 

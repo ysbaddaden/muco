@@ -2,6 +2,7 @@
 #define MUCO_FIBER_H
 
 #include "ucontext.h"
+#include "threads.h"
 
 typedef void (*fiber_main_t)();
 

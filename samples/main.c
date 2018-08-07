@@ -20,7 +20,7 @@ void coroutine2() {
 int main() {
     printf("main: initializing\n");
 
-    co_init();
+    co_init(1);
     f1 = co_fiber_new(coroutine1);
     f2 = co_fiber_new(coroutine2);
 

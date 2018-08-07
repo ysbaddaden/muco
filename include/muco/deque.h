@@ -9,7 +9,7 @@ struct age {
 };
 
 typedef struct deque {
-    _Atomic int bot;
+    atomic_int bot;
     _Atomic struct age age;
     void **deq;
 } deque_t;
