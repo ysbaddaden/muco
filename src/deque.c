@@ -30,7 +30,8 @@ static void deque_finalize(deque_t *self) {
 static void deque_push_bottom(deque_t *self, void *item) {
     int bot = self->bot;
     self->deq[bot] = item;
-    self->bot = bot + 1;
+    bot += 1;
+    self->bot = bot;
 }
 
 static void *deque_pop_bottom(deque_t *self) {
@@ -41,7 +42,6 @@ static void *deque_pop_bottom(deque_t *self) {
     if (bot == 0) {
         return NULL;
     }
-
     bot -= 1;
     self->bot = bot;
 
@@ -51,11 +51,13 @@ static void *deque_pop_bottom(deque_t *self) {
         return item;
     }
 
+    self->bot = 0;
+
     new_age.tag = old_age.tag + 1;
     new_age.top = 0;
 
     if (bot == old_age.top) {
-        if (atomic_compare_exchange_strong((struct age *)&self->age, &old_age, new_age)) {
+        if (atomic_compare_exchange_weak((struct age *)&self->age, &old_age, new_age)) {
             return item;
         }
     }
@@ -70,17 +72,22 @@ static void *deque_pop_top(deque_t *self) {
 
     old_age = self->age;
     bot = self->bot;
-
     if (bot <= old_age.top) {
         return NULL;
     }
 
     item = self->deq[old_age.top];
-    new_age.tag = old_age.tag;
-    new_age.top = old_age.top + 1;
+    new_age = old_age;
+    new_age.top += 1;
 
-    if (atomic_compare_exchange_strong((struct age *)&self->age, &old_age, new_age)) {
+    if (atomic_compare_exchange_weak((struct age *)&self->age, &old_age, new_age)) {
         return item;
     }
     return NULL;
+}
+
+static int deque_lazy_size(deque_t *self) {
+    int bot = self->bot;
+    struct age age = self->age;
+    return bot - age.top;
 }

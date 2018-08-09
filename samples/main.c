@@ -9,7 +9,7 @@ void coroutine1() {
   co_resume(f2);
 
   printf("coroutine1: continued\n");
-  co_resume(co_scheduler()->main);
+  co_resume(co_scheduler_main());
 }
 
 void coroutine2() {
@@ -20,7 +20,7 @@ void coroutine2() {
 int main() {
     printf("main: initializing\n");
 
-    co_init(1);
+    co_init(0);
     f1 = co_fiber_new(coroutine1);
     f2 = co_fiber_new(coroutine2);
 

@@ -4,8 +4,6 @@
 #include "scheduler.h"
 #include "stack.h"
 
-#include <stdio.h>
-
 static int running = 1;
 static int nprocs;
 static scheduler_t *schedulers;
@@ -24,117 +22,163 @@ static inline fiber_t *scheduler_steal(scheduler_t *self) {
 
 static inline fiber_t *next_runnable(scheduler_t *self) {
     fiber_t *fiber;
+#ifdef DEBUG
     int i = 0;
+#endif
 
     while (1) {
         thrd_yield();
 
         if (!running) {
-            thrd_exit(thrd_current());
+            return NULL;
         }
 
-        // try to deque
-        fiber = deque_pop_bottom(&self->runnables);
-        if (fiber) {
-            return fiber;
-        }
-
-#ifndef NDEBUG
+#ifdef DEBUG
         if (i == 0) {
             i = 1;
-            DEBUG("thief", self, NULL);
+            LOG("thief", self, NULL);
         }
 #endif
         fiber = scheduler_steal(self);
         if (fiber) {
-            DEBUG("stole", self, fiber);
+            LOG("stole", self, fiber);
             return fiber;
         }
     }
 }
 
 static void on_fiber_exit() {
-    // TODO: recycle fiber (and its stack)
+    // We can't munmap the stack of the current fiber, otherwise current stack
+    // frames would become unaccessible, resulting in an immediate segfault. We
+    // thus delay the call to `fiber_free` to later on. This also makes it
+    // possible to recycle a fiber + stack.
 
     scheduler_t *s = tss_get(scheduler);
     fiber_t *fiber = s->current;
     s->current = NULL;
 
-    DEBUG("free", s, fiber);
-    fiber_free(fiber);
+    LOG("done", s, fiber);
+    deque_push_bottom(&s->pending, fiber);
 
-    scheduler_reschedule(s);
+    scheduler_resume(s, s->main);
 }
 
 static void scheduler_initialize(scheduler_t *self, int color) {
     self->color = color;
-    DEBUG("initialize", self, NULL);
-
-    //self->thread = thrd_current();
+    LOG("initialize", self, NULL);
 
     self->main = fiber_main();
     self->current = self->main;
-    //DEBUG("spawn_main", self, self->main);
+    LOG("spawn_main", self, self->main);
 
     deque_initialize(&self->runnables);
+    deque_initialize(&self->pending);
     self->rng = (pcg32_random_t)PCG32_INITIALIZER;
     pcg32_srandom_r(&self->rng, rand(), 0);
-
-    // self->enqueue_main = 0;
-
-    if (getcontext(&self->link) == -1) {
-        perror("getcontext");
-        exit(EXIT_FAILURE);
-    }
-    stack_allocate(&self->link.uc_stack, STACK_SIZE);
-    self->link.uc_link = NULL;
-    makecontext(&self->link, (void (*)())on_fiber_exit, 0);
 }
 
 static void scheduler_finalize(scheduler_t *self) {
-    DEBUG("finalize", self, NULL);
+    LOG("finalize", self, NULL);
+    scheduler_free_pending(self, -1);
     deque_finalize(&self->runnables);
+    deque_finalize(&self->pending);
     fiber_free(self->main);
 }
 
+static int scheduler_thread_start(void *data) {
+    scheduler_t *s = (scheduler_t *)data;
+    tss_set(scheduler, s);
+
+    while (running) {
+        fiber_t *fiber = next_runnable(s);
+        if (fiber) {
+            scheduler_resume(s, fiber);
+        }
+    }
+    return 0;
+}
+
+static void scheduler_free_pending(scheduler_t *self, int count) {
+    for (int i = 0; count < 0 || i < count; i++) {
+        fiber_t *fiber = deque_pop_top(&self->pending);
+        if (!fiber) break;
+        //if (fiber != self->main) {
+            LOG("free", self, fiber);
+            fiber_free(fiber);
+        //}
+    }
+}
+
 static void scheduler_reschedule(scheduler_t *self) {
-    DEBUG("reschedule", self, NULL);
-    scheduler_resume(self, next_runnable(self));
+    LOG("reschedule", self, NULL);
+
+    // if any fiber is in queue, resume it:
+    fiber_t *fiber = deque_pop_bottom(&self->runnables);
+
+    // otherwise steal fiber:
+    if (!fiber) {
+        fiber = next_runnable(self);
+    }
+
+    // fallback to resume main fiber:
+    if (!fiber) {
+        fiber = self->main;
+    }
+
+    scheduler_resume(self, fiber);
 }
 
 static void scheduler_resume(scheduler_t *self, fiber_t *fiber) {
-    DEBUG("resume", self, fiber);
+    LOG("resume", self, fiber);
+
     fiber_t *current = self->current;
     self->current = fiber;
 
+    // Avoid a race condition where a fiber may be stolen *before* it's state is
+    // actually saved: we spin until `co_swapcontext` stored the fiber's state.
+    while (!fiber->resumeable) {
+        thrd_yield();
+    }
+
     if (current) {
-        if (swapcontext(&current->state, &fiber->state) == -1) {
-            perror("swapcontext");
-            exit(EXIT_FAILURE);
-        }
+        LOG("swapcontext", self, fiber);
+        co_swapcontext(&current->stack_top, &current->resumeable, fiber->stack_top, &fiber->resumeable);
     } else {
-        if (setcontext(&fiber->state) == -1) {
-            perror("setcontext");
-            exit(EXIT_FAILURE);
-        }
+        LOG("setcontext", self, fiber);
+        co_setcontext(fiber->stack_top, &fiber->resumeable);
     }
 }
 
 static fiber_t *scheduler_spawn(scheduler_t *self, fiber_main_t proc) {
-    fiber_t *fiber = fiber_new(proc, &self->link);
-    DEBUG("spawn", self, fiber);
+    fiber_t *fiber;
+
+    // try to recycle fiber + stack:
+    fiber = deque_pop_bottom(&self->pending);
+    if (fiber) {
+        fiber_initialize(fiber, proc, on_fiber_exit);
+    } else {
+        // allocate new fiber + stack:
+        fiber = fiber_new(proc, on_fiber_exit);
+    }
+
+    LOG("spawn", self, fiber);
     scheduler_enqueue(self, fiber);
     return fiber;
 }
 
 static void scheduler_yield(scheduler_t *self) {
-    DEBUG("yield", self, NULL);
+    LOG("yield", self, NULL);
 
+    // if any fiber is in queue, resume it:
     fiber_t *fiber = deque_pop_bottom(&self->runnables);
-    scheduler_enqueue(self, self->current);
 
+    // resume scheduler's main fiber that will steal work (allowing current
+    // fiber to be stolen):
     if (!fiber) {
-        fiber = next_runnable(self);
+        fiber = self->main;
     }
+
+    // actual yield:
+    scheduler_enqueue(self, self->current);
     scheduler_resume(self, fiber);
 }

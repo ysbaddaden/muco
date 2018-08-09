@@ -15,6 +15,7 @@ void co_suspend();
 void co_resume(fiber_t *fiber);
 void co_yield();
 
+fiber_t *co_scheduler_main();
 void co_run();
 void co_break();
 

@@ -5,8 +5,7 @@
 #include <time.h>
 #include <unistd.h>
 
-//#define COUNT (10000000ULL)
-#define COUNT (1000LL)
+#define COUNT (10000000ULL)
 
 atomic_ulong done;
 long count;
@@ -31,7 +30,7 @@ int main(int argc, char *argv[]) {
     count = COUNT / cocount;
 
     atomic_init(&done, cocount);
-    co_init(4);
+    co_init(2);
 
     for (unsigned long i = 0; i < cocount; i++) {
         co_spawn(switchtask);

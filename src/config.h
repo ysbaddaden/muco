@@ -16,6 +16,6 @@
 #define STACK_MAP (MAP_ANONYMOUS | MAP_PRIVATE | MAP_STACK)
 #define STACK_FD (-1)
 #define STACK_OFFSET (0)
-#define STACK_SIZE (SIGSTKSZ)
+#define STACK_SIZE (8 * 1024 * 1024)
 
 #endif

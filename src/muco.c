@@ -5,44 +5,41 @@
 static mtx_t co_mutex;
 static cnd_t co_cond;
 
-static int co_thread(void *data) {
-    scheduler_t *s = (scheduler_t *)data;
-    tss_set(scheduler, s);
-    scheduler_reschedule(s);
-    return 0;
-}
-
 void co_init(int n) {
-    thrd_t thread;
-
-    if (n < 1) {
-        error(0, 0, "WARNING: ignoring invalid nprocs=%d using default of %d\n", n, 1);
+    if (n < 0) {
+        error(0, 0, "WARNING: ignoring invalid nprocs=%d\n", n);
         n = 1;
     }
+    int c = (n == 0) ? 1 : n;
 
     mtx_init(&co_mutex, mtx_plain);
     cnd_init(&co_cond);
-    tss_create(&scheduler, (void(*)(void *))scheduler_finalize);
+    //tss_create(&scheduler, (void(*)(void *))scheduler_finalize);
+    tss_create(&scheduler, NULL);
 
     nprocs = n;
-    schedulers = calloc(n + 1, sizeof(scheduler_t));
-
-    tss_set(scheduler, schedulers);
+    schedulers = calloc(c, sizeof(scheduler_t));
     scheduler_initialize(schedulers, 32);
 
-    for (int i = 1; i <= nprocs; i++) {
+    for (int i = 1; i < nprocs; i++) {
         scheduler_initialize(schedulers + i, 32 + i);
     }
 
-    for (int i = 1; i <= nprocs; i++) {
-        if (thrd_create(&thread, co_thread, schedulers + i) != thrd_success) {
-            error(1, 0, "thrd_create failed");
-        }
-    }
+    tss_set(scheduler, schedulers);
 }
 
 void co_free() {
-    scheduler_finalize(tss_get(scheduler));
+    if (nprocs == 0) {
+        scheduler_finalize(schedulers);
+    } else {
+        for (int i = 0; i < nprocs; i++) {
+            scheduler_finalize(schedulers + i);
+        }
+    }
+    free(schedulers);
+
+    tss_delete(scheduler);
+
     mtx_destroy(&co_mutex);
     cnd_destroy(&co_cond);
 }
@@ -79,15 +76,39 @@ void co_yield() {
     scheduler_yield(co_scheduler());
 }
 
+fiber_t *co_scheduler_main() {
+  return co_scheduler()->main;
+}
+
 void co_run() {
-    DEBUG("run", co_scheduler(), NULL);
+    thrd_t thread;
+    LOG("run", co_scheduler(), NULL);
+
+    for (int i = 0; i < nprocs; i++) {
+        if (thrd_create(&thread, scheduler_thread_start, schedulers + i) != thrd_success) {
+            error(1, 0, "thrd_create failed");
+        }
+    }
+
+    struct timespec ts = {5, 0};
+
     mtx_lock(&co_mutex);
-    cnd_wait(&co_cond, &co_mutex);
+    while (1) {
+        cnd_timedwait(&co_cond, &co_mutex, &ts);
+        if (!running) return;
+
+        for (int i = 0; i < nprocs; i++) {
+            scheduler_t *s = schedulers + i;
+            int count = deque_lazy_size(&s->pending) / 2;
+            scheduler_free_pending(s, count);
+        }
+        if (!running) return;
+    }
     mtx_unlock(&co_mutex);
 }
 
 void co_break() {
-    DEBUG("break", co_scheduler(), NULL);
+    LOG("break", co_scheduler(), NULL);
     mtx_lock(&co_mutex);
     running = 0;
     cnd_signal(&co_cond);

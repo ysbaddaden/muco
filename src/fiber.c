@@ -1,22 +1,29 @@
 #include "config.h"
 #include "fiber.h"
+#include "context.h"
 #include "stack.h"
 
-static int fiber_initialize(fiber_t *self, fiber_main_t proc, ucontext_t *link) {
-    if (getcontext(&self->state) == -1) {
-        error(1, errno, "getcontext");
+static void fiber_run(fiber_t *self) {
+    self->proc();
+    if (self->link) {
+        self->link(self);
     }
-    stack_allocate(&self->state.uc_stack, STACK_SIZE);
-    self->state.uc_link = link;
-    makecontext(&self->state, proc, 0);
+}
+
+static int fiber_initialize(fiber_t *self, fiber_main_t proc, fiber_exit_t link) {
+    self->resumeable = 1;
+    self->proc = proc;
+    self->link = link;
+    fiber_makecontext(self);
     return 0;
 }
 
-static fiber_t *fiber_new(fiber_main_t proc, ucontext_t *link) {
+static fiber_t *fiber_new(fiber_main_t proc, fiber_exit_t link) {
     fiber_t *self = calloc(1, sizeof(fiber_t));
     if (self == NULL) {
         error(1, errno, "calloc");
     }
+    stack_allocate(&self->stack, STACK_SIZE);
     fiber_initialize(self, proc, link);
     return self;
 }
@@ -26,14 +33,13 @@ static fiber_t *fiber_main(void) {
     if (self == NULL) {
         error(1, errno, "calloc");
     }
-    //if (getcontext(&self->state) == -1) {
-    //    error(1, errno, "getcontext");
-    //}
+    self->resumeable = 0;
+    fiber_main_makecontext(self);
     return self;
 }
 
 static void fiber_finalize(fiber_t *self) {
-    stack_deallocate(&self->state.uc_stack);
+    stack_deallocate(&self->stack);
 }
 
 static void fiber_free(fiber_t *self) {
