@@ -1,4 +1,5 @@
 #include "scheduler.c"
+#include "lock.c"
 #include "threads.h"
 #include <stdlib.h>
 
@@ -45,7 +46,7 @@ void co_free() {
 }
 
 static inline scheduler_t *co_scheduler() {
-    return tss_get(scheduler);
+    return scheduler_current();
 }
 
 fiber_t *co_spawn(fiber_main_t proc) {

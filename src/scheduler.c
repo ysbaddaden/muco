@@ -8,8 +8,6 @@ static int running = 1;
 static int nprocs;
 static scheduler_t *schedulers;
 
-static tss_t scheduler;
-
 static inline fiber_t *scheduler_steal(scheduler_t *self) {
     int j = pcg32_boundedrand_r(&self->rng, nprocs);
     scheduler_t *victim = schedulers + j;
@@ -115,12 +113,7 @@ static void scheduler_reschedule(scheduler_t *self) {
     // if any fiber is in queue, resume it:
     fiber_t *fiber = deque_pop_bottom(&self->runnables);
 
-    // otherwise steal fiber:
-    if (!fiber) {
-        fiber = next_runnable(self);
-    }
-
-    // fallback to resume main fiber:
+    // otherwise resume main fiber:
     if (!fiber) {
         fiber = self->main;
     }
@@ -137,6 +130,7 @@ static void scheduler_resume(scheduler_t *self, fiber_t *fiber) {
     // Avoid a race condition where a fiber may be stolen *before* it's state is
     // actually saved: we spin until `co_swapcontext` stored the fiber's state.
     while (!fiber->resumeable) {
+        // LOG("not resumeable", self, fiber);
         thrd_yield();
     }
 

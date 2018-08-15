@@ -32,6 +32,12 @@ static void LOG(char *action, scheduler_t *scheduler, fiber_t *fiber) {
 #define LOG(action, scheduler, fiber)
 #endif
 
+static tss_t scheduler;
+
+static inline scheduler_t *scheduler_current() {
+    return tss_get(scheduler);
+}
+
 static void scheduler_initialize(scheduler_t *self, int color);
 static void scheduler_finalize(scheduler_t *self);
 static int scheduler_thread_start(void *data);
@@ -45,5 +51,6 @@ static inline void scheduler_enqueue(scheduler_t *self, fiber_t *fiber) {
     LOG("enqueue", self, fiber);
     deque_push_bottom(&self->runnables, (void *)fiber);
 }
+
 
 #endif

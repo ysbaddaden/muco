@@ -1,15 +1,19 @@
 #ifndef FIBER_H
 #define FIBER_H
 
+#include <signal.h>
+
 typedef struct fiber fiber_t;
 typedef void (*fiber_main_t)();
 typedef void (*fiber_exit_t)(fiber_t *);
 typedef void (*fiber_run_t)(fiber_t *);
 
 typedef struct fiber {
-    int resumeable;
-    void *stack_top;
+    long resumeable; // don't move: required by context asm
+    void *stack_top; // don't move: required by context asm
+
     stack_t stack;
+
     fiber_main_t proc;
     fiber_exit_t link;
 } fiber_t;

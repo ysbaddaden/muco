@@ -1,6 +1,6 @@
 .POSIX:
 
-CC = clang-5.0
+CC = clang-5.0 -mcx16
 CFLAGS = -g -O3 -std=gnu11 -Iinclude -Isrc -Wall -Wextra -Wpedantic $(FLAGS)
 LDFLAGS = -latomic -lpthread ./libmuco.a
 OBJECTS = src/muco.o src/pcg_basic.o
@@ -16,7 +16,10 @@ main: samples/main.o libmuco.a
 switch: samples/switch.o libmuco.a
 	$(CC) samples/switch.o -o switch $(LDFLAGS)
 
+mutex: samples/mutex.o libmuco.a
+	$(CC) samples/mutex.o -o mutex $(LDFLAGS)
+
 clean: .phony
-	rm -f libmuco.a src/*.o samples/*.o main switch
+	rm -f libmuco.a src/*.o samples/*.o main switch mutex
 
 .phony:
