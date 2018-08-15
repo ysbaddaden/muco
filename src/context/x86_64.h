@@ -37,12 +37,11 @@ static void fiber_main_makecontext(fiber_t *self) {
 }
 
 __attribute__((naked)) void co_setcontext(
-        __attribute__((__unused__)) void *sp,
-        __attribute__((__unused__)) int *resumeable
+        __attribute__((__unused__)) fiber_t *fiber
 ) {
     __asm__ volatile (
-        "movl $0, (%rsi);" // set fiber as non resumeable
-        "movq %rdi, %rsp;" // rdi = sp
+        "movl $0, 0(%rdi);"    // fiber->resumeable = 0
+        "movq 8(%rdi), %rsp;"  // rsp = fiber->stack_top
         "popq %r15;"
         "popq %r14;"
         "popq %r13;"
@@ -55,31 +54,31 @@ __attribute__((naked)) void co_setcontext(
 }
 
 __attribute__((naked)) void co_swapcontext(
-        __attribute__((__unused__)) void *ssp,
-        __attribute__((__unused__)) int *sresumeable,
-        __attribute__((__unused__)) void *dsp,
-        __attribute__((__unused__)) int *dresumeable
+        __attribute__((__unused__)) fiber_t *curr,
+        __attribute__((__unused__)) fiber_t *next
 ) {
     __asm__ volatile (
-        "pushq %rdi;"        // push argument for initial resume
-        "pushq %rbx;"        // push callee-saved registers on the stack
+        // getcontext (curr):
+        "pushq %rdi;"          // push argument for initial resume
+        "pushq %rbx;"          // push callee-saved registers on the stack
         "pushq %rbp;"
         "pushq %r12;"
         "pushq %r13;"
         "pushq %r14;"
         "pushq %r15;"
-        "movq %rsp, (%rdi);" // save stack top (ssp)
-        "movl $1, (%rsi);"   // set previous fiber as resumeable
+        "movq %rsp, 8(%rdi);"  // save stack top (curr->stack_top = rsp)
+        "movl $1, 0(%rdi);"    // set previous fiber as resumeable (curr->resumeable = 1)
 
-        "movl $0, (%rcx);"   // set next fiber as non resumeable
-        "movq %rdx, %rsp;"   // load stack top (dsp)
-        "popq %r15;"         // pop callee-saved registers from the stack
+        // setcontext (next):
+        "movl $0, (%rsi);"     // set next fiber as non resumeable (next->resumeable = 0)
+        "movq 8(%rsi), %rsp;"  // load stack top (rsp = next->stack_top)
+        "popq %r15;"           // pop callee-saved registers from the stack
         "popq %r14;"
         "popq %r13;"
         "popq %r12;"
         "popq %rbp;"
         "popq %rbx;"
-        "popq %rdi;"         // pop argument for initial resume
-        "retq;"              // popq rpi
+        "popq %rdi;"           // pop argument for initial resume
+        "retq;"                // popq rpi
     );
 }

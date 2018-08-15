@@ -142,10 +142,10 @@ static void scheduler_resume(scheduler_t *self, fiber_t *fiber) {
 
     if (current) {
         LOG("swapcontext", self, fiber);
-        co_swapcontext(&current->stack_top, &current->resumeable, fiber->stack_top, &fiber->resumeable);
+        co_swapcontext(current, fiber);
     } else {
         LOG("setcontext", self, fiber);
-        co_setcontext(fiber->stack_top, &fiber->resumeable);
+        co_setcontext(fiber);
     }
 }
 
