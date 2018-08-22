@@ -1,5 +1,6 @@
 #include "scheduler.c"
 #include "lock.c"
+#include "channel.c"
 #include "threads.h"
 #include <stdlib.h>
 

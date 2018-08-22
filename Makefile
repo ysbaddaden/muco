@@ -19,7 +19,10 @@ switch: samples/switch.o libmuco.a
 mutex: samples/mutex.o libmuco.a
 	$(CC) samples/mutex.o -o mutex $(LDFLAGS)
 
+channel: samples/channel.o libmuco.a
+	$(CC) samples/channel.o -o channel $(LDFLAGS)
+
 clean: .phony
-	rm -f libmuco.a src/*.o samples/*.o main switch mutex
+	rm -f libmuco.a src/*.o samples/*.o main switch mutex channel
 
 .phony:

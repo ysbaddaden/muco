@@ -5,6 +5,7 @@ typedef void co_fiber_t;
 typedef void co_scheduler_t;
 typedef void (*co_fiber_main_t)();
 typedef void co_lock_t;
+typedef void co_channel_t;
 
 void co_init(int nprocs);
 void co_free();
@@ -24,5 +25,10 @@ co_lock_t *co_lock_new();
 void co_lock_free(co_lock_t *);
 int co_lock(co_lock_t *);
 int co_unlock(co_lock_t *);
+
+co_channel_t *co_channel_new();
+void co_channel_free(co_channel_t *);
+int co_channel_send(co_channel_t *, void *);
+int co_channel_receive(co_channel_t *, void **);
 
 #endif

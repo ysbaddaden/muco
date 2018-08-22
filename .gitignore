@@ -4,3 +4,5 @@ a.out
 *.gch
 /main
 /switch
+/mutex
+/channel
