@@ -1,24 +1,16 @@
 #include "scheduler.h"
-#include "msqueue.h"
+#include "lmsqueue.h"
 #include <stdio.h>
 #include <errno.h>
 
 typedef struct lock {
     _Atomic fiber_t *owner;
-    msqueue_t waiters;
-    int closed;
+    lmsqueue_t waiters;
 } lock_t;
-
-#define LOCK_NOT_CLOSED(self) \
-    if ((self)->closed) { \
-        errno = ECANCELED; \
-        return -1;\
-    }
 
 static void lock_initialize(lock_t *self) {
     atomic_init(&self->owner, NULL);
-    msqueue_initialize(&self->waiters);
-    self->closed = 0;
+    lmsqueue_initialize(&self->waiters);
 }
 
 lock_t *co_lock_new() {
@@ -27,28 +19,12 @@ lock_t *co_lock_new() {
     return self;
 }
 
-void co_lock_close(lock_t *self) {
-    if (self->closed) return;
-    self->closed = 1;
-
-    scheduler_t *scheduler = scheduler_current();
-
-    while (1) {
-        fiber_t *next = msqueue_head(&self->waiters);
-        if (!next) break;
-        scheduler_enqueue(scheduler, next);
-    }
-}
-
 void co_lock_free(lock_t *self) {
-    co_lock_close(self);
-    msqueue_finalize(&self->waiters);
+    lmsqueue_finalize(&self->waiters);
     free(self);
 }
 
 int co_lock(lock_t *self) {
-    LOCK_NOT_CLOSED(self);
-
     scheduler_t *scheduler = scheduler_current();
     fiber_t *current = scheduler->current;
     fiber_t *owner = atomic_load((fiber_t **)&self->owner);
@@ -61,10 +37,10 @@ int co_lock(lock_t *self) {
     }
 
     // always enqueue the current fiber:
-    msqueue_enqueue(&self->waiters, current);
+    lmsqueue_enqueue(&self->waiters, &current->node);
 
     while (1) {
-        if (current == msqueue_head(&self->waiters)) {
+        if (current == lmsqueue_head(&self->waiters)) {
             // avoid a race condition with unlock: the unlocking fiber must
             // decide whether it should resume the HEAD fiber (aka the current
             // fiber) or not. we use an atomic to solve that, where both the
@@ -95,11 +71,9 @@ int co_lock(lock_t *self) {
         // suspend:
         scheduler_reschedule(scheduler);
 
-        LOCK_NOT_CLOSED(self);
-
         // get updated references:
         scheduler = scheduler_current();
-        current = scheduler->current;
+        //current = scheduler->current;
 
         owner = atomic_load((fiber_t **)&self->owner);
         if (current == owner) {
@@ -111,8 +85,6 @@ int co_lock(lock_t *self) {
 }
 
 int co_unlock(lock_t *self) {
-    LOCK_NOT_CLOSED(self);
-
     scheduler_t *scheduler = scheduler_current();
     fiber_t *current = scheduler->current;
     fiber_t *owner = atomic_load((fiber_t **)&self->owner);
@@ -124,10 +96,10 @@ int co_unlock(lock_t *self) {
     }
 
     // release lock (remove current fiber from wait list):
-    msqueue_dequeue(&self->waiters);
+    lmsqueue_dequeue(&self->waiters);
 
     // get next owner fiber, or NULL if not is queued, yet:
-    fiber_t *next = msqueue_head(&self->waiters);
+    fiber_t *next = lmsqueue_head(&self->waiters);
 
     // try to swap the owner.
     if (atomic_compare_exchange_strong((fiber_t **)&self->owner, &current, next)) {

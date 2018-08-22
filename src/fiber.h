@@ -1,6 +1,7 @@
 #ifndef FIBER_H
 #define FIBER_H
 
+#include "lmsqueue.h"
 #include <signal.h>
 
 typedef struct fiber fiber_t;
@@ -13,6 +14,7 @@ typedef struct fiber {
     void *stack_top; // don't move: required by context asm
 
     stack_t stack;
+    lmsnode_t node;
 
     fiber_main_t proc;
     fiber_exit_t link;

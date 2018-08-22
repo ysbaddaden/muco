@@ -37,7 +37,6 @@ static node_t *node_new(void *value) {
 typedef struct msqueue {
     _Atomic pointer_t head;
     _Atomic pointer_t tail;
-    //node_t *dummy;
 } msqueue_t;
 
 static inline int pointer_consistent(pointer_t a, pointer_t b) {
@@ -46,19 +45,12 @@ static inline int pointer_consistent(pointer_t a, pointer_t b) {
 
 static void msqueue_initialize(msqueue_t *self) {
     // allocate dummy node:
-    //node_t *node = malloc(sizeof(node_t));
-    //node_init(node, NULL);
-    //self->dummy = node;
     node_t *node = node_new(NULL);
 
     // initialize queue:
     pointer_t dummy = {node, 0};
     atomic_init((pointer_t *)&self->head, dummy);
     atomic_init((pointer_t *)&self->tail, dummy);
-}
-
-static void msqueue_finalize(msqueue_t *self) {
-    //free(self->dummy);
 }
 
 static void *msqueue_head(msqueue_t *self) {
@@ -142,4 +134,11 @@ static void *msqueue_dequeue(msqueue_t *self) {
         }
     }
 }
+
+static void msqueue_finalize(msqueue_t *self) {
+    fiber_t *fiber;
+    while (fiber = msqueue_dequeue(self)) {
+    }
+}
+
 #endif

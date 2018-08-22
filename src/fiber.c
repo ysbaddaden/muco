@@ -15,6 +15,7 @@ static int fiber_initialize(fiber_t *self, fiber_main_t proc, fiber_exit_t link)
     self->proc = proc;
     self->link = link;
     fiber_makecontext(self);
+    lmsnode_init(&self->node, self);
     return 0;
 }
 
@@ -35,6 +36,7 @@ static fiber_t *fiber_main(void) {
     }
     self->resumeable = 0;
     fiber_main_makecontext(self);
+    lmsnode_init(&self->node, self);
     return self;
 }
 
