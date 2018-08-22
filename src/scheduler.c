@@ -31,6 +31,11 @@ static inline fiber_t *next_runnable(scheduler_t *self) {
             return NULL;
         }
 
+        fiber = deque_pop_bottom(&self->runnables);
+        if (fiber) {
+            return fiber;
+        }
+
 #ifdef DEBUG
         if (i == 0) {
             i = 1;
@@ -113,9 +118,14 @@ static void scheduler_reschedule(scheduler_t *self) {
     // if any fiber is in queue, resume it:
     fiber_t *fiber = deque_pop_bottom(&self->runnables);
 
-    // otherwise resume main fiber:
     if (!fiber) {
-        fiber = self->main;
+        // try to steal a fiber:
+        fiber = scheduler_steal(self);
+
+        // fallback to resume main fiber:
+        if (!fiber) {
+            fiber = self->main;
+        }
     }
 
     scheduler_resume(self, fiber);
@@ -135,10 +145,10 @@ static void scheduler_resume(scheduler_t *self, fiber_t *fiber) {
     }
 
     if (current) {
-        LOG("swapcontext", self, fiber);
+        //LOG("swapcontext", self, fiber);
         co_swapcontext(current, fiber);
     } else {
-        LOG("setcontext", self, fiber);
+        //LOG("setcontext", self, fiber);
         co_setcontext(fiber);
     }
 }
