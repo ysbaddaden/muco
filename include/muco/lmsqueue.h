@@ -21,7 +21,6 @@ typedef struct lmsnode {
 typedef struct lmsqueue {
     _Atomic lmspointer_t head;
     _Atomic lmspointer_t tail;
-    lmsnode_t *dummy;
 } lmsqueue_t;
 
 #endif

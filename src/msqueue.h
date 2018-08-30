@@ -6,6 +6,12 @@
  * Queue Algorithms" by Michael and Scott, hence MS-queue.
  *
  * See <http://www.cs.rochester.edu/u/scott/papers/1996_PODC_queues.pdf>
+ *
+ * FIXME: free() call in dequeue is subject to use-after-free!
+ * See http://blog.shealevy.com/2015/04/23/use-after-free-bug-in-maged-m-michael-and-michael-l-scotts-non-blocking-concurrent-queue-algorithm/
+ *
+ * The paper quickly states:
+ * "We use Treiber’s simple and efficient non-blocking stack algorithm [21] to implement a non-blocking free list.
  */
 #include <stdint.h>
 #include <stdatomic.h>

@@ -1,6 +1,10 @@
 #ifndef MUCO_LMSQUEUE_H
 #define MUCO_LMSQUEUE_H
 
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdlib.h>
+
 /*
  * Based on "An Optimistic Approach to Lock-Free FIFO Queues" by Ladan-Mozes and
  * Shavit, hence LMS-queue.
@@ -8,25 +12,40 @@
  * See * <https://people.csail.mit.edu/edya/publications/OptimisticFIFOQueue-DISC2004.pdf>
  */
 
-#include "lmsnode.h"
+typedef struct lmsnode lmsnode_t;
 
-typedef struct lmsqueue {
-    _Atomic lmspointer_t head;
-    _Atomic lmspointer_t tail;
-    lmsnode_t *dummy;
-} lmsqueue_t;
+typedef struct lmspointer {
+    lmsnode_t *ptr;
+    uintptr_t tag;
+} lmspointer_t;
 
-static lmsnode_t *lmsnode_new(void *value) {
-    lmsnode_t *self = malloc(sizeof(lmsnode_t));
-    lmsnode_initialize(self, value);
-    return self;
+static inline int lmspointer_equals(lmspointer_t a, lmspointer_t b) {
+    return a.ptr == b.ptr && a.tag == b.tag;
 }
 
-static void lmsnode_reset(lmsnode_t *self) {
+typedef struct lmsnode {
+    _Atomic lmspointer_t next;
+    _Atomic lmspointer_t prev;
+    void *value;
+} lmsnode_t;
+
+static void lmsnode_initialize(lmsnode_t *self, void *value) {
+    self->value = value;
     lmspointer_t null = {NULL, 0};
     atomic_init((lmspointer_t *)&self->next, null);
     atomic_init((lmspointer_t *)&self->prev, null);
 }
+
+static lmsnode_t *lmsnode_new(void *value) {
+    lmsnode_t *self = calloc(1, sizeof(lmsnode_t));
+    lmsnode_initialize(self, value);
+    return self;
+}
+
+typedef struct lmsqueue {
+    _Atomic lmspointer_t head;
+    _Atomic lmspointer_t tail;
+} lmsqueue_t;
 
 static void lmsqueue_initialize(lmsqueue_t *self) {
     // allocate dummy node:
@@ -36,11 +55,6 @@ static void lmsqueue_initialize(lmsqueue_t *self) {
     lmspointer_t ptr = {node, 0};
     atomic_init((lmspointer_t *)&self->head, ptr);
     atomic_init((lmspointer_t *)&self->tail, ptr);
-    self->dummy = node;
-}
-
-static void lmsqueue_finalize(lmsqueue_t *self) {
-    free(self->dummy);
 }
 
 static inline void lmsqueue_fixlist(lmsqueue_t *self, lmspointer_t tail, lmspointer_t head) {
@@ -70,12 +84,11 @@ static inline void lmsqueue_fixlist(lmsqueue_t *self, lmspointer_t tail, lmspoin
     }
 }
 
-static void lmsqueue_enqueue(lmsqueue_t *self, lmsnode_t *node) {
+static void lmsqueue_enqueue(lmsqueue_t *self, void *value) {
     lmspointer_t tail;
 
     // allocate new node:
-    // lmsnode_t *node = lmsnode_new(value);
-    lmsnode_reset(node);
+    lmsnode_t *node = lmsnode_new(value);
 
     while (1) {
         tail = self->tail;
@@ -116,18 +129,17 @@ static void *lmsqueue_dequeue(lmsqueue_t *self) {
                 }
             } else {
                 // last node in queue: allocate dummy node
-                //lmsnode_t *dummy = lmsnode_new(NULL);
-                lmsnode_reset(self->dummy);
+                lmsnode_t *dummy = lmsnode_new(NULL);
                 lmspointer_t next = {tail.ptr, tail.tag + 1};
-                self->dummy->next = next;
+                dummy->next = next;
 
                 // set dummy node as prev:
-                lmspointer_t ptr = {self->dummy, tail.tag + 1};
+                lmspointer_t ptr = {dummy, tail.tag + 1};
                 if (atomic_compare_exchange_strong((lmspointer_t *)&self->tail, &tail, ptr)) {
-                    lmspointer_t prev = {self->dummy, tail.tag};
+                    lmspointer_t prev = {dummy, tail.tag};
                     head.ptr->prev = prev;
-                //} else {
-                //    free(dummy);
+                } else {
+                    free(dummy);
                 }
                 continue;
             }
@@ -136,7 +148,7 @@ static void *lmsqueue_dequeue(lmsqueue_t *self) {
             lmspointer_t ptr = {firstNodePrev.ptr, head.tag + 1};
             if (atomic_compare_exchange_strong((lmspointer_t *)&self->head, &head, ptr)) {
                 // success. free node; return value:
-                //free(head.ptr);
+                free(head.ptr);
                 return value;
             }
         } else {                                    // head points to dummy
@@ -178,18 +190,17 @@ static void *lmsqueue_head(lmsqueue_t *self) {
                 }
             } else {
                 // last node in queue: allocate dummy node
-                //lmsnode_t *dummy = lmsnode_new(NULL);
-                lmsnode_reset(self->dummy);
+                lmsnode_t *dummy = lmsnode_new(NULL);
                 lmspointer_t next = {tail.ptr, tail.tag + 1};
-                self->dummy->next = next;
+                dummy->next = next;
 
                 // set dummy node as prev:
-                lmspointer_t ptr = {self->dummy, tail.tag + 1};
+                lmspointer_t ptr = {dummy, tail.tag + 1};
                 if (atomic_compare_exchange_strong((lmspointer_t *)&self->tail, &tail, ptr)) {
-                    lmspointer_t prev = {self->dummy, tail.tag};
+                    lmspointer_t prev = {dummy, tail.tag};
                     head.ptr->prev = prev;
-                //} else {
-                //    free(dummy);
+                } else {
+                    free(dummy);
                 }
                 continue;
             }

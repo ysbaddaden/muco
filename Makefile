@@ -3,7 +3,7 @@
 CC = clang-5.0 -mcx16
 CFLAGS = -g -O3 -std=gnu11 -Iinclude -Isrc -Wall -Wextra -Wpedantic $(FLAGS)
 LDFLAGS = -latomic -lpthread ./libmuco.a
-OBJECTS = src/muco.o src/pcg_basic.o
+OBJECTS = src/muco.o src/lock.o src/channel.o
 
 all: libmuco.a
 

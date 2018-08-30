@@ -1,8 +1,6 @@
 #ifndef MUCO_FIBER_H
 #define MUCO_FIBER_H
 
-#include "muco/lmsqueue.h"
-
 #include <signal.h>
 #include <stdint.h>
 
@@ -14,9 +12,7 @@ typedef void (*fiber_run_t)(fiber_t *);
 typedef struct fiber {
     long resumeable; // don't move: required by context asm
     void *stack_top; // don't move: required by context asm
-
     stack_t stack;
-    lmsnode_t node;
 
     fiber_main_t proc;
     fiber_exit_t link;

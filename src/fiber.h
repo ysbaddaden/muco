@@ -2,7 +2,6 @@
 #define MUCO_FIBER_PRIV_H
 
 #include "stack.h"
-#include "lmsnode.h"
 
 typedef struct fiber fiber_t;
 typedef void (*fiber_main_t)();
@@ -15,7 +14,6 @@ typedef struct fiber {
     void *stack_top; // don't move: required by context asm
 
     stack_t stack;
-    lmsnode_t node;
 
     fiber_main_t proc;
     fiber_exit_t link;
@@ -34,13 +32,11 @@ static void fiber_initialize(fiber_t *self, fiber_main_t proc, fiber_exit_t link
     self->proc = proc;
     self->link = link;
     fiber_makecontext(self);
-    lmsnode_initialize(&self->node, self);
     self->name = name;
 }
 
 static void fiber_finalize(fiber_t *self) {
     stack_deallocate(&self->stack);
-    //lmsnode_finalize(&self->node);
 }
 
 static void fiber_run(fiber_t *self) {
@@ -58,7 +54,6 @@ static fiber_t *fiber_main(void) {
     self->resumeable = 0;
     self->name = "main";
     fiber_main_makecontext(self);
-    lmsnode_initialize(&self->node, self);
     return self;
 }
 

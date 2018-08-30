@@ -6,6 +6,18 @@
 
 #include <errno.h>
 #include <stdatomic.h>
+#include <stdlib.h>
+
+//#ifdef DEBUG
+//#include <stdio.h>
+//#include <unistd.h>
+//static void LOG(char *action, scheduler_t *scheduler, fiber_t *fiber) {
+//    if (!fiber) fiber = co_current();
+//    dprintf(2, "                    %12s \033[%dmscheduler=%p fiber=%p [%s]\033[0m\n", action, scheduler->color, (void *)scheduler, (void *)fiber, fiber->name);
+//}
+//#else
+//#define LOG(action, scheduler, fiber)
+//#endif
 
 typedef struct lock {
     _Atomic fiber_t *owner;
@@ -24,7 +36,6 @@ lock_t *co_lock_new() {
 }
 
 void co_lock_free(lock_t *self) {
-    lmsqueue_finalize(&self->waiters);
     free(self);
 }
 
@@ -43,7 +54,7 @@ int co_lock(lock_t *self) {
     }
 
     // always enqueue the current fiber:
-    lmsqueue_enqueue(&self->waiters, &current->node);
+    lmsqueue_enqueue(&self->waiters, current);
 
     while (1) {
         if (current == lmsqueue_head(&self->waiters)) {

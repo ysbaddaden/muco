@@ -4,10 +4,10 @@
 #include "muco/lock.h"
 
 typedef struct co_channel {
-  co_lock_t r_lock;
-  co_lock_t w_lock;
+  co_lock_t r_lock;          // receive lock
+  co_lock_t w_lock;          // send lock
+  co_lock_t s_lock;          // sync send/receive lock
   fiber_t *receiver;
-
   atomic_int has_value;      // uses an atomic to avoid potential OOO execution,
   void *value;               // because has_value must be set *after* value has.
 } co_channel_t;
