@@ -1,5 +1,5 @@
-#ifndef QUEUE_H
-#define QUEUE_H
+#ifndef MUCO_LMSQUEUE_H
+#define MUCO_LMSQUEUE_H
 
 /*
  * Based on "An Optimistic Approach to Lock-Free FIFO Queues" by Ladan-Mozes and
@@ -7,39 +7,18 @@
  *
  * See * <https://people.csail.mit.edu/edya/publications/OptimisticFIFOQueue-DISC2004.pdf>
  */
-#include <stdint.h>
-#include <stdatomic.h>
-#include <stdlib.h>
 
+#include "lmsnode.h"
 
-typedef struct lmsnode lmsnode_t;
-
-typedef struct lmspointer {
-    lmsnode_t *ptr;
-    uintptr_t tag;
-} lmspointer_t;
-
-static inline int lmspointer_equals(lmspointer_t a, lmspointer_t b) {
-    return a.ptr == b.ptr && a.tag == b.tag;
-}
-
-
-typedef struct lmsnode {
-    _Atomic lmspointer_t next;
-    _Atomic lmspointer_t prev;
-    void *value;
-} lmsnode_t;
-
-static void lmsnode_init(lmsnode_t *self, void *value) {
-    self->value = value;
-    lmspointer_t null = {NULL, 0};
-    atomic_init((lmspointer_t *)&self->next, null);
-    atomic_init((lmspointer_t *)&self->prev, null);
-}
+typedef struct lmsqueue {
+    _Atomic lmspointer_t head;
+    _Atomic lmspointer_t tail;
+    lmsnode_t *dummy;
+} lmsqueue_t;
 
 static lmsnode_t *lmsnode_new(void *value) {
     lmsnode_t *self = malloc(sizeof(lmsnode_t));
-    lmsnode_init(self, value);
+    lmsnode_initialize(self, value);
     return self;
 }
 
@@ -48,13 +27,6 @@ static void lmsnode_reset(lmsnode_t *self) {
     atomic_init((lmspointer_t *)&self->next, null);
     atomic_init((lmspointer_t *)&self->prev, null);
 }
-
-
-typedef struct lmsqueue {
-    _Atomic lmspointer_t head;
-    _Atomic lmspointer_t tail;
-    lmsnode_t *dummy;
-} lmsqueue_t;
 
 static void lmsqueue_initialize(lmsqueue_t *self) {
     // allocate dummy node:

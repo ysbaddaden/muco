@@ -9,7 +9,7 @@ void coroutine1() {
   co_resume(f2);
 
   printf("coroutine1: continued\n");
-  co_resume(co_scheduler_main());
+  co_resume(co_main());
 }
 
 void coroutine2() {

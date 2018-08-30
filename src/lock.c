@@ -1,21 +1,25 @@
-#include "scheduler.h"
+#ifndef MUCO_LOCK_PRIV_H
+#define MUCO_LOCK_PRIV_H
+
 #include "lmsqueue.h"
-#include <stdio.h>
+#include "muco.h"
+
 #include <errno.h>
+#include <stdatomic.h>
 
 typedef struct lock {
     _Atomic fiber_t *owner;
     lmsqueue_t waiters;
 } lock_t;
 
-static void lock_initialize(lock_t *self) {
+void co_lock_initialize(lock_t *self) {
     atomic_init(&self->owner, NULL);
     lmsqueue_initialize(&self->waiters);
 }
 
 lock_t *co_lock_new() {
     lock_t *self = calloc(1, sizeof(lock_t));
-    lock_initialize(self);
+    co_lock_initialize(self);
     return self;
 }
 
@@ -24,14 +28,16 @@ void co_lock_free(lock_t *self) {
     free(self);
 }
 
+fiber_t *co_lock_owner(lock_t *self) {
+    return atomic_load((fiber_t **)&self->owner);
+}
+
 int co_lock(lock_t *self) {
-    scheduler_t *scheduler = scheduler_current();
-    fiber_t *current = scheduler->current;
+    fiber_t *current = co_current();
     fiber_t *owner = atomic_load((fiber_t **)&self->owner);
 
     // fastpath: prevent recursive deadlock.
     if (current == owner) {
-        //LOG("EDEADLK", scheduler, current);
         errno = EDEADLK;
         return -1;
     }
@@ -49,7 +55,7 @@ int co_lock(lock_t *self) {
             if (atomic_compare_exchange_strong((fiber_t **)&self->owner, &owner, current)) {
                 // success. lock acquired. the unlocking fiber won't try to
                 // resume the locking fiber. we can return;
-                // LOG("locked", scheduler, current);
+                // LOG("locked", co_scheduler(), current);
                 return 0;
             }
 
@@ -59,7 +65,7 @@ int co_lock(lock_t *self) {
             if (!owner) {
                 // try again:
                 if (atomic_compare_exchange_strong((fiber_t **)&self->owner, &owner, current)) {
-                    // LOG("locked", scheduler, current);
+                    // LOG("locked", co_scheduler(), current);
                     return 0;
                 }
             }
@@ -69,28 +75,22 @@ int co_lock(lock_t *self) {
         }
 
         // suspend:
-        scheduler_reschedule(scheduler);
-
-        // get updated references:
-        scheduler = scheduler_current();
-        //current = scheduler->current;
+        co_suspend();
 
         owner = atomic_load((fiber_t **)&self->owner);
         if (current == owner) {
             // done. fiber was given the lock by unlock.
-            // LOG("locked", scheduler, current);
+            // LOG("locked", co_scheduler(), current);
             return 0;
         }
     }
 }
 
-int co_unlock(lock_t *self) {
-    scheduler_t *scheduler = scheduler_current();
-    fiber_t *current = scheduler->current;
+int co_unlock2(lock_t *self, int enqueue) {
+    fiber_t *current = co_current();
     fiber_t *owner = atomic_load((fiber_t **)&self->owner);
 
     if (current != owner) {
-        //LOG("EPERM", scheduler, current);
         errno = EPERM;
         return -1;
     }
@@ -98,18 +98,26 @@ int co_unlock(lock_t *self) {
     // release lock (remove current fiber from wait list):
     lmsqueue_dequeue(&self->waiters);
 
-    // get next owner fiber, or NULL if not is queued, yet:
-    fiber_t *next = lmsqueue_head(&self->waiters);
+    if (enqueue) {
+        // get next owner fiber, or NULL if not is queued, yet:
+        fiber_t *next = lmsqueue_head(&self->waiters);
 
-    // try to swap the owner.
-    if (atomic_compare_exchange_strong((fiber_t **)&self->owner, &current, next)) {
-        // success. we *must* resume the next fiber, that was previously
-        // suspended or is just rescheduling (see co_lock):
-        if (next) {
-            scheduler_enqueue(scheduler, next);
+        // try to swap the owner.
+        if (atomic_compare_exchange_strong((fiber_t **)&self->owner, &current, next)) {
+            // success. we *must* resume the next fiber, that was previously
+            // suspended or is just rescheduling (see co_lock):
+            if (next) {
+                co_enqueue(next);
+            }
         }
     }
 
-    // LOG("unlocked", scheduler, current);
+    // LOG("unlocked", co_scheduler(), current);
     return 0;
 }
+
+int co_unlock(lock_t *self) {
+    return co_unlock2(self, 1);
+}
+
+#endif

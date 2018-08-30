@@ -18,7 +18,7 @@
  * For additional information about the PCG random number generation scheme,
  * including its license and other licensing options, visit
  *
- *       http://www.pcg-random.org
+ *     http://www.pcg-random.org
  */
 
 /*
@@ -28,13 +28,26 @@
  * your project.
  */
 
-#include "pcg_basic.h"
+#ifndef PCG_BASIC_H
+#define PCG_BASIC_H
 
-// state for global RNGs
+#include <inttypes.h>
 
-//static pcg32_random_t pcg32_global = PCG32_INITIALIZER;
+struct pcg_state_setseq_64 {    // Internals are *Private*.
+    uint64_t state;             // RNG state.  All values are possible.
+    uint64_t inc;               // Controls which RNG sequence (stream) is
+                                // selected. Must *always* be odd.
+};
+typedef struct pcg_state_setseq_64 pcg32_random_t;
 
-// pcg32_srandom(initstate, initseq)
+// If you *must* statically initialize it, here's one.
+
+#define PCG32_INITIALIZER   { 0x853c49e6748fea9bULL, 0xda3e39cb94b95bdbULL }
+
+void pcg32_srandom_r(pcg32_random_t* rng, uint64_t initstate, uint64_t initseq);
+uint32_t pcg32_random_r(pcg32_random_t* rng);
+uint32_t pcg32_boundedrand_r(pcg32_random_t* rng, uint32_t bound);
+
 // pcg32_srandom_r(rng, initstate, initseq):
 //     Seed the rng.  Specified in two parts, state initializer and a
 //     sequence selection constant (a.k.a. stream id)
@@ -48,7 +61,6 @@ void pcg32_srandom_r(pcg32_random_t* rng, uint64_t initstate, uint64_t initseq)
     pcg32_random_r(rng);
 }
 
-// pcg32_random()
 // pcg32_random_r(rng)
 //     Generate a uniformly distributed 32-bit random number
 
@@ -61,8 +73,6 @@ uint32_t pcg32_random_r(pcg32_random_t* rng)
     return (xorshifted >> rot) | (xorshifted << ((-rot) & 31));
 }
 
-
-// pcg32_boundedrand(bound):
 // pcg32_boundedrand_r(rng, bound):
 //     Generate a uniformly distributed number, r, where 0 <= r < bound
 
@@ -93,7 +103,10 @@ uint32_t pcg32_boundedrand_r(pcg32_random_t* rng, uint32_t bound)
     // is eliminated.
     for (;;) {
         uint32_t r = pcg32_random_r(rng);
-        if (r >= threshold)
+        if (r >= threshold) {
             return r % bound;
+        }
     }
 }
+
+#endif

@@ -1,5 +1,7 @@
-#ifndef STACK_H
-#define STACK_H
+#ifndef MUCO_STACK_H
+#define MUCO_STACK_H
+
+#include "config.h"
 
 static inline void stack_allocate(stack_t *stack, size_t size) {
     void *sp = mmap(NULL, size, STACK_PROT, STACK_MAP, STACK_FD, STACK_OFFSET);

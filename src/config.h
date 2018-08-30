@@ -1,5 +1,5 @@
-#ifndef CONFIG_H
-#define CONFIG_H
+#ifndef MUCO_CONFIG_H
+#define MUCO_CONFIG_H
 
 #ifndef _BSD_SOURCE
 #define _BSD_SOURCE
@@ -9,6 +9,7 @@
 #include <error.h>
 #include <signal.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include <sys/mman.h>
 #include <ucontext.h>
 
@@ -17,5 +18,10 @@
 #define STACK_FD (-1)
 #define STACK_OFFSET (0)
 #define STACK_SIZE (8 * 1024 * 1024)
+
+static int co_running;
+static int co_nprocs;
+static void *co_schedulers;
+static pthread_key_t tl_scheduler;
 
 #endif
