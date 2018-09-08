@@ -29,6 +29,14 @@ void co_init(int n) {
     pthread_setspecific(tl_scheduler, co_schedulers);
 }
 
+int co_procs() {
+    char *nprocs = getenv("NPROCS");
+    if (nprocs) {
+        return atoi(nprocs);
+    }
+    return 4;
+}
+
 void co_free() {
     if (co_nprocs == 0) {
         scheduler_finalize(co_schedulers);
@@ -110,7 +118,7 @@ void co_run() {
 
         for (int i = 0; i < co_nprocs; i++) {
             scheduler_t *s = (scheduler_t *)co_schedulers + i;
-            int count = deque_lazy_size(&s->pending) / 2;
+            int count = queue_lazy_size(&s->pending) / 2;
             scheduler_free_pending(s, count);
         }
         if (!co_running) return;

@@ -1,5 +1,5 @@
 #include "muco.h"
-#include "muco/lock.h"
+#include "muco/mutex.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,7 +9,7 @@
 
 #define COUNT (2000000ULL)
 
-static co_lock_t *mutex;
+static co_mtx_t mutex;
 static unsigned long long increment = 0;
 atomic_ulong done;
 long count;
@@ -20,18 +20,12 @@ static void locktask() {
     int i = count;
 
     while (i--) {
-        if (co_lock(mutex) == -1) {
-            error(1, errno, "co_lock");
-        }
-
+        co_mtx_lock(&mutex);
         increment += 1;
-
-        if (co_unlock(mutex) == -1) {
-            error(1, errno, "co_unlock");
-        }
+        co_mtx_unlock(&mutex);
     }
 
-    unsigned long old = atomic_fetch_sub((unsigned long *)&done, 1);
+    unsigned long old = atomic_fetch_sub(&done, 1);
     if (old == 1) co_break();
 }
 
@@ -40,8 +34,8 @@ int main(int argc, char *argv[]) {
     count = COUNT / cocount;
     atomic_init(&done, cocount);
 
-    co_init(4);
-    mutex = co_lock_new();
+    co_init(co_procs());
+    co_mtx_init(&mutex);
 
     for (unsigned long i = 0; i < cocount; i++) {
         co_spawn(locktask);
@@ -61,7 +55,7 @@ int main(int argc, char *argv[]) {
     printf("switch[%lu]: muco: %llu locks in %lld ms, %lld locks per second (increment=%llu)\n",
             cocount, COUNT, duration, ((1000LL * COUNT) / duration), increment);
 
-    co_lock_free(mutex);
+    co_mtx_destroy(&mutex);
     co_free();
     return 0;
 }

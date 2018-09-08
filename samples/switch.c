@@ -19,7 +19,7 @@ static void switchtask() {
         co_yield();
     }
 
-    unsigned long old = atomic_fetch_sub((unsigned long *)&done, 1);
+    unsigned long old = atomic_fetch_sub(&done, 1);
     if (old == 1) {
         co_break();
     }
@@ -30,7 +30,7 @@ int main(int argc, char *argv[]) {
     count = COUNT / cocount;
     atomic_init(&done, cocount);
 
-    co_init(2);
+    co_init(co_procs());
 
     for (unsigned long i = 0; i < cocount; i++) {
         co_spawn(switchtask);

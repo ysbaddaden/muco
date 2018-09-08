@@ -3,10 +3,12 @@
 
 #include "lmsqueue.h"
 #include "muco.h"
+#include "muco/lock.h"
 
 #include <errno.h>
-#include <stdatomic.h>
 #include <stdlib.h>
+
+#define lock_t co_lock_t
 
 //#ifdef DEBUG
 //#include <stdio.h>
@@ -19,16 +21,6 @@
 //#define LOG(action, scheduler, fiber)
 //#endif
 
-typedef struct lock {
-    _Atomic fiber_t *owner;
-    lmsqueue_t waiters;
-} lock_t;
-
-void co_lock_initialize(lock_t *self) {
-    atomic_init(&self->owner, NULL);
-    lmsqueue_initialize(&self->waiters);
-}
-
 lock_t *co_lock_new() {
     lock_t *self = calloc(1, sizeof(lock_t));
     co_lock_initialize(self);
@@ -36,6 +28,7 @@ lock_t *co_lock_new() {
 }
 
 void co_lock_free(lock_t *self) {
+    while (lmsqueue_dequeue(&self->waiters)) {};
     free(self);
 }
 
@@ -129,6 +122,17 @@ int co_unlock2(lock_t *self, int enqueue) {
 
 int co_unlock(lock_t *self) {
     return co_unlock2(self, 1);
+}
+
+void co_lock_clear(lock_t *self, int enqueue_head) {
+    fiber_t *fiber;
+    if (!enqueue_head) {
+        lmsqueue_dequeue(&self->waiters);
+    }
+    while ((fiber = lmsqueue_dequeue(&self->waiters))) {
+        co_enqueue(fiber);
+    }
+    atomic_store((fiber_t **)&self->owner, NULL);
 }
 
 #endif

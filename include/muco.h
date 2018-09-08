@@ -5,6 +5,9 @@
 #include "muco/fiber.h"
 #include "muco/scheduler.h"
 
+int co_nprocs;
+int co_procs();
+
 void co_init(int);
 void co_free();
 void co_run();

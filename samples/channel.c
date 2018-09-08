@@ -1,29 +1,30 @@
 #include "muco.h"
 #include "muco/channel.h"
+#include <error.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
 
-#define COUNT (500000ULL)
+#define COUNT (1000000ULL)
 
 atomic_ulong done;
 long count;
 struct timespec start, stop;
 
-static co_channel_t *chan;
+static co_chan_t chan;
 
 void generate() {
     long i = count;
 
     while (i--) {
-        if (co_channel_send(chan, (void *)i)) break;
+        if (co_chan_send(&chan, (void *)i)) {
+            error(1, 0, "chan is closed");
+        }
     }
 
-    unsigned long old = atomic_fetch_sub((unsigned long *)&done, 1);
-    if (old == 1) {
-        // TODO: close the channel so consumers could terminate nicely
-        // co_channel_close(chan);
+    if (atomic_fetch_sub(&done, 1) == 1) {
+        co_chan_close(&chan);
         co_break();
     }
 }
@@ -32,10 +33,13 @@ void consume() {
     long i;
 
     while (1) {
-        if (co_channel_receive(chan, (void *)&i)) break;
+        if (co_chan_receive(&chan, (void *)&i)) {
+            break;
+        }
     }
 
-    printf("%lu\n", i);
+    printf("done: %lu\n", i);
+    // co_break();
 }
 
 int main(int argc, char **argv) {
@@ -52,15 +56,16 @@ int main(int argc, char **argv) {
     count = COUNT / gcount;
     atomic_init(&done, gcount);
 
-    co_init(8);
+    co_init(co_procs());
 
-    chan = co_channel_new();
+    // channel: unbuffered + synchronous
+    co_chan_init(&chan, 1, 0);
 
     while (gcount--) {
-        co_spawn(generate);
+        co_spawn_named(generate, "gen");
     }
     while (ccount--) {
-        co_spawn(consume);
+        co_spawn_named(consume, "con");
     }
 
     clock_gettime(CLOCK_MONOTONIC, &start);
@@ -74,11 +79,10 @@ int main(int argc, char **argv) {
     // should never happen:
     if (duration == 0) duration = 1;
 
-    printf("channel[%lu]: muco: %llu messages in %lld ms, %lld messages per second\n",
+    printf("chan[%lu]: muco: %llu messages in %lld ms, %lld messages per second\n",
             cocount, COUNT, duration, ((1000LL * COUNT) / duration));
 
-    // FIXME: segfaults:
-    // co_channel_free(chan);
+    co_chan_destroy(&chan);
     co_free();
 
     return 0;

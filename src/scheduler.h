@@ -3,7 +3,7 @@
 
 #include "pcg_basic.h"
 #include "fiber.h"
-#include "deque.h"
+#include "queue.h"
 
 typedef struct scheduler {
     int color;
@@ -11,8 +11,8 @@ typedef struct scheduler {
     fiber_t *main;
     fiber_t *current;
 
-    deque_t runnables;
-    deque_t pending;
+    queue_t runnables;
+    queue_t pending;
 
     pcg32_random_t rng;
 } scheduler_t;
@@ -56,8 +56,8 @@ static void scheduler_initialize(scheduler_t *self, int color) {
     self->current = self->main;
     //LOG("spawn_main", self, self->main);
 
-    deque_initialize(&self->runnables);
-    deque_initialize(&self->pending);
+    queue_initialize(&self->runnables);
+    queue_initialize(&self->pending);
     self->rng = (pcg32_random_t)PCG32_INITIALIZER;
     pcg32_srandom_r(&self->rng, rand(), 0);
 }
@@ -65,8 +65,8 @@ static void scheduler_initialize(scheduler_t *self, int color) {
 static void scheduler_finalize(scheduler_t *self) {
     //LOG("finalize", self, NULL);
     scheduler_free_pending(self, -1);
-    deque_finalize(&self->runnables);
-    deque_finalize(&self->pending);
+    queue_finalize(&self->runnables);
+    queue_finalize(&self->pending);
     fiber_free(self->main);
 }
 
@@ -74,7 +74,7 @@ static fiber_t *scheduler_spawn(scheduler_t *self, fiber_main_t proc, char *name
     fiber_t *fiber;
 
     // try to recycle fiber + stack:
-    fiber = deque_pop_bottom(&self->pending);
+    fiber = queue_pop_bottom(&self->pending);
     if (fiber) {
         fiber_initialize(fiber, proc, on_fiber_exit, name);
     } else {
@@ -98,14 +98,14 @@ static void on_fiber_exit() {
     scheduler->current = NULL;
 
     LOG("done", scheduler, fiber);
-    deque_push_bottom(&scheduler->pending, fiber);
+    queue_push_bottom(&scheduler->pending, fiber);
 
     scheduler_resume(scheduler, scheduler->main);
 }
 
 static void scheduler_free_pending(scheduler_t *self, int count) {
     for (int i = 0; count < 0 || i < count; i++) {
-        fiber_t *fiber = deque_pop_top(&self->pending);
+        fiber_t *fiber = queue_pop_top(&self->pending);
         if (!fiber) break;
         //if (fiber != self->main) {
             LOG("free", self, fiber);
@@ -116,7 +116,7 @@ static void scheduler_free_pending(scheduler_t *self, int count) {
 
 static void scheduler_enqueue(scheduler_t *self, fiber_t *fiber) {
     LOG("enqueue", self, fiber);
-    deque_push_bottom(&self->runnables, (void *)fiber);
+    queue_push_bottom(&self->runnables, (void *)fiber);
 }
 
 static void scheduler_resume(scheduler_t *self, fiber_t *fiber) {
@@ -146,7 +146,7 @@ static void scheduler_reschedule(scheduler_t *self) {
     LOG("suspend", self, self->current);
 
     // if any fiber is in queue, resume it:
-    fiber_t *fiber = deque_pop_bottom(&self->runnables);
+    fiber_t *fiber = queue_pop_bottom(&self->runnables);
 
     //if (!fiber) {
     //    // try to steal a fiber (avoid a context switch to main):
@@ -163,12 +163,12 @@ static void scheduler_reschedule(scheduler_t *self) {
 }
 
 static void scheduler_yield(scheduler_t *self) {
-    // duplicates scheduler_reschedule() but takes care to deque/steal a fiber
+    // duplicates scheduler_reschedule() but takes care to queue/steal a fiber
     // *before* enqueuing the current fiber, which would otherwise be the one
     // to be picked up, which is pointless.
 
     // if any fiber is in queue, resume it:
-    fiber_t *fiber = deque_pop_bottom(&self->runnables);
+    fiber_t *fiber = queue_pop_bottom(&self->runnables);
 
     //if (!fiber) {
     //    // try to steal a fiber (avoid a context switch to main):
@@ -191,7 +191,7 @@ static fiber_t *scheduler_steal_once(scheduler_t *self) {
     scheduler_t *victim = (scheduler_t *)co_schedulers + j;
 
     if (victim != self) {
-        return deque_pop_top(&victim->runnables);
+        return queue_pop_top(&victim->runnables);
     }
     return NULL;
 }
@@ -223,7 +223,7 @@ static void *scheduler_start(void *data) {
 
     while (co_running) {
         // consume from internal queue:
-        fiber_t *fiber = deque_pop_bottom(&scheduler->runnables);
+        fiber_t *fiber = queue_pop_bottom(&scheduler->runnables);
 
         if (!fiber) {
             // empty queue: become thief:

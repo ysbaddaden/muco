@@ -1,117 +1,158 @@
-#ifndef CO_CHANNEL_PRIV_H
-#define CO_CHANNEL_PRIV_H
-
 #include "muco.h"
-#include "muco/lock.h"
+#include "muco/channel.h"
 
-//#ifdef DEBUG
-//#include <stdio.h>
-//#include <unistd.h>
-//static void LOG(char *action, scheduler_t *scheduler, fiber_t *fiber) {
-//    if (!fiber) fiber = co_current();
-//    dprintf(2, "                    %12s \033[%dmscheduler=%p fiber=%p [%s]\033[0m\n", action, scheduler->color, (void *)scheduler, (void *)fiber, fiber->name);
-//}
-//#else
-//#define LOG(action, scheduler, fiber)
-//#endif
+#include <stdlib.h>
+#include <stdio.h>
 
-typedef struct channel {
-  co_lock_t r_lock;          // receive lock
-  co_lock_t w_lock;          // send lock
-  co_lock_t s_lock;          // sync send/receive lock
-  fiber_t *receiver;
-  atomic_int has_value;      // uses an atomic to avoid potential OOO execution,
-  void *value;               // because has_value must be set *after* value has.
-} channel_t;
+enum chan_state {
+    chan_opened = 0,
+    chan_closing = 1,
+    chan_closed = 2
+};
 
-channel_t *co_channel_new();
-static void channel_initialize(channel_t *);
-static void channel_finalize(channel_t *);
-int co_channel_send(channel_t *, void *);
-int co_channel_receive(channel_t *, void **);
+#define entry_t co_chan_entry_t
+#define chan_t co_chan_t
 
-static void channel_initialize(channel_t *self) {
-    co_lock_initialize(&self->r_lock);
-    co_lock_initialize(&self->w_lock);
-    co_lock_initialize(&self->s_lock);
-    self->receiver = NULL;
-    atomic_init(&self->has_value, 0);
-    self->value = NULL;
+#if defined(DEBUG) || defined(CHAN_DEBUG)
+#  define LOG(str, ...) dprintf(2, "fiber=%p self=" str, (void*)co_current(), __VA_ARGS__)
+#else
+#  define LOG(...)
+#endif
+
+// FIXME: a race condition causes all fibers to be suspended!
+
+void co_chan_init(chan_t *self, size_t capacity, int async) {
+    self->async = async;
+    self->capacity = capacity;
+    self->size = 0;
+    self->state = chan_opened;
+    self->buf = malloc(sizeof(entry_t) * capacity);
+    co_mtx_init(&self->mutex);
+    co_cond_init(&self->senders);
+    co_cond_init(&self->receivers);
 }
 
-static void channel_finalize(channel_t *self) {
-    co_lock_free(&self->r_lock);
-    co_lock_free(&self->w_lock);
-    self->value = NULL;
+void co_chan_destroy(chan_t *self) {
+    free(self->buf);
+    co_mtx_destroy(&self->mutex);
+    co_cond_destroy(&self->senders);
+    co_cond_destroy(&self->receivers);
 }
 
-channel_t *co_channel_new() {
-    channel_t *channel = calloc(1, sizeof(channel_t));
-    channel_initialize(channel);
-    return channel;
-}
+int co_chan_send(chan_t *self, void *value) {
+    LOG("%p: co_chan_send\n", (void *)self);
+    if (self->state) return -1;
 
-void co_channel_free(channel_t *self) {
-    channel_finalize(self);
-    free(self);
-}
+    //LOG("send: locking\n");
+    co_mtx_lock(&self->mutex);
+    //LOG("send: locked\n");
 
-int co_channel_send(channel_t *self, void *value) {
-    // sender wait list:
-    co_lock(&self->w_lock);
+    // wait until the channel queue has some room for a value:
+    while (co_chan_full(self)) {
+        if (self->state) {
+            co_mtx_unlock(&self->mutex);
+            return -1;
+        }
+        //LOG("send: waiting\n");
+        co_cond_wait(&self->senders, &self->mutex);
+        //LOG("send: resumed\n");
+    }
 
-    // set value (requires lock to synchronize with current receiver):
-    co_lock(&self->s_lock);
-    self->value = value;
-    self->has_value = 1;
-    fiber_t *receiver = self->receiver;
-    co_unlock(&self->s_lock);
+    // enqueue item:
+    //LOG("send: push value (%ld)\n", self->size);
+    self->buf[self->size] = (entry_t){self->async ? NULL : co_current(), value};
+    self->size++;
 
-    if (receiver) {
-        // resume waiting receiver:
-        co_resume(receiver);
-    } else {
+    // wakeup a waiting receiver:
+    //LOG("send: signal(receivers)\n");
+    co_cond_signal(&self->receivers);
+
+    // done.
+    //LOG("send: unlocking\n");
+    co_mtx_unlock(&self->mutex);
+    //LOG("send: unlocked\n");
+
+    if (!self->async) {
+        //LOG("send: pending\n");
         co_suspend();
     }
 
-    // done. release write lock and enqueue next sender (that will set the
-    // channel value, and maybe resume a receiver):
-    co_unlock(&self->w_lock);
     return 0;
 }
 
-int co_channel_receive(channel_t *self, void **value) {
-    // receiver wait list:
-    co_lock(&self->r_lock);
+int co_chan_receive(chan_t *self, void **value) {
+    LOG("%p: co_chan_receive\n", (void *)self);
+    if (self->state == chan_closed) return -1;
 
-    // check for value presence (fast path):
-    if (!self->has_value) {
-        // retry with lock: (required to synchronize with current sender):
-        co_lock(&self->s_lock);
+    //LOG("recv: locking\n");
+    co_mtx_lock(&self->mutex);
+    //LOG("recv: locked\n");
 
-        if (self->has_value) {
-            co_unlock(&self->s_lock);
-        } else {
-            // wait for value:
-            self->receiver = co_current();
-            co_unlock(&self->s_lock);
-            co_suspend();
-            self->receiver = NULL;
+    // wait until the channel queue has a value:
+    while (co_chan_empty(self)) {
+        if (self->state == chan_closed) {
+            co_mtx_unlock(&self->mutex);
+            return -1;
         }
+        //LOG("recv: waiting\n");
+        co_cond_wait(&self->receivers, &self->mutex);
+        //LOG("recv: resumed\n");
     }
 
-    // get value:
-    *value = self->value;
-    self->value = NULL;
-    self->has_value = 0;
+    // dequeue item:
+    self->size--;
+    //LOG("recv: shift value (%ld)\n", self->size);
+    entry_t entry = self->buf[self->size];
+    *value = entry.value;
 
-    // enqueue sender:
-    co_enqueue(co_lock_owner(&self->w_lock));
+    if (self->state == chan_closing) {
+        if (co_chan_empty(self)) {
+            // close the channel now:
+            //LOG("recv: closed!\n");
+            self->state = chan_closed;
+        }
+    } else {
+        // wakeup one waiting sender:
+        //LOG("recv: signal(senders)\n");
+        co_cond_signal(&self->senders);
+    }
 
-    // done. release read lock but don't enqueue next receiver (sender will
-    // release write lock and enqueue next sender, if any):
-    co_unlock2(&self->r_lock, 0);
+    //LOG("recv: unlocking\n");
+    co_mtx_unlock(&self->mutex);
+    //LOG("recv: unlocked\n");
+
+    if (entry.sender) {
+        // if synchronous: wakeup pending sender:
+        //LOG("recv: enqueue(sender)\n");
+        co_enqueue(entry.sender);
+    }
+
+    // done.
     return 0;
 }
 
-#endif
+void co_chan_close(chan_t *self) {
+    LOG("%p: co_chan_close\n", (void *)self);
+    //LOG("close: locking\n");
+    co_mtx_lock(&self->mutex);
+
+    // close immediately or delay until the channel queue is emptied:
+    if (co_chan_empty(self)) {
+        //LOG("close: closed!\n");
+        self->state = chan_closed;
+    } else {
+        //LOG("close: closing...\n");
+        self->state = chan_closing;
+    }
+
+    // wakeup pending fibers:
+    //LOG("close: broadcast(senders)\n");
+    co_cond_broadcast(&self->senders);
+
+    //LOG("close: broadcast(receivers)\n");
+    co_cond_broadcast(&self->receivers);
+
+    // done.
+    //LOG("close: unlocking\n");
+    co_mtx_unlock(&self->mutex);
+}

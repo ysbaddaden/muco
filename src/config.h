@@ -19,8 +19,8 @@
 #define STACK_OFFSET (0)
 #define STACK_SIZE (8 * 1024 * 1024)
 
+int co_nprocs;
 static int co_running;
-static int co_nprocs;
 static void *co_schedulers;
 static pthread_key_t tl_scheduler;
 

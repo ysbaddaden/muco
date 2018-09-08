@@ -1,5 +1,5 @@
-#ifndef MUCO_DEQUE_PRIV_H
-#define MUCO_DEQUE_PRIV_H
+#ifndef MUCO_QUEUE_PRIV_H
+#define MUCO_QUEUE_PRIV_H
 
 #include "config.h"
 #include <stdatomic.h>
@@ -9,16 +9,16 @@ struct age {
     int top;
 };
 
-typedef struct deque {
+typedef struct queue {
     atomic_int bot;
     _Atomic struct age age;
     void **deq;
-} deque_t;
+} queue_t;
 
-// FIXME: should be unlimited
+// TODO: should be unlimited
 #define DEQUE_SIZE (4UL * 1024 * 1024 * 1024)
 
-static void deque_initialize(deque_t *self) {
+static void queue_initialize(queue_t *self) {
     struct age age = {0, 0};
 
     atomic_init(&self->bot, 0);
@@ -36,18 +36,18 @@ static void deque_initialize(deque_t *self) {
     self->deq = buf;
 }
 
-static void deque_finalize(deque_t *self) {
+static void queue_finalize(queue_t *self) {
     munmap(self->deq, DEQUE_SIZE);
 }
 
-static void deque_push_bottom(deque_t *self, void *item) {
+static void queue_push_bottom(queue_t *self, void *item) {
     int bot = self->bot;
     self->deq[bot] = item;
     bot += 1;
     self->bot = bot;
 }
 
-static void *deque_pop_bottom(deque_t *self) {
+static void *queue_pop_bottom(queue_t *self) {
     struct age old_age, new_age;
     void *item;
 
@@ -70,7 +70,7 @@ static void *deque_pop_bottom(deque_t *self) {
     new_age.top = 0;
 
     if (bot == old_age.top) {
-        if (atomic_compare_exchange_weak((struct age *)&self->age, &old_age, new_age)) {
+        if (atomic_compare_exchange_weak(&self->age, &old_age, new_age)) {
             return item;
         }
     }
@@ -78,7 +78,7 @@ static void *deque_pop_bottom(deque_t *self) {
     return NULL;
 }
 
-static void *deque_pop_top(deque_t *self) {
+static void *queue_pop_top(queue_t *self) {
     struct age old_age, new_age;
     void *item;
     int bot;
@@ -93,13 +93,13 @@ static void *deque_pop_top(deque_t *self) {
     new_age = old_age;
     new_age.top += 1;
 
-    if (atomic_compare_exchange_weak((struct age *)&self->age, &old_age, new_age)) {
+    if (atomic_compare_exchange_weak(&self->age, &old_age, new_age)) {
         return item;
     }
     return NULL;
 }
 
-static int deque_lazy_size(deque_t *self) {
+static int queue_lazy_size(queue_t *self) {
     int bot = self->bot;
     struct age age = self->age;
     return bot - age.top;

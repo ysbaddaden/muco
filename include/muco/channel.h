@@ -1,20 +1,36 @@
 #ifndef MUCO_CHANNEL_H
 #define MUCO_CHANNEL_H
 
-#include "muco/lock.h"
+#include "muco/mutex.h"
 
-typedef struct co_channel {
-  co_lock_t r_lock;          // receive lock
-  co_lock_t w_lock;          // send lock
-  co_lock_t s_lock;          // sync send/receive lock
-  fiber_t *receiver;
-  atomic_int has_value;      // uses an atomic to avoid potential OOO execution,
-  void *value;               // because has_value must be set *after* value has.
-} co_channel_t;
+typedef struct {
+  fiber_t *sender;
+  void *value;
+} co_chan_entry_t;
 
-co_channel_t *co_channel_new();
-void co_channel_free(co_channel_t *);
-int co_channel_send(co_channel_t *, void *);
-int co_channel_receive(co_channel_t *, void **);
+typedef struct {
+    int async;
+    int state;
+    size_t capacity;
+    size_t size;
+    co_chan_entry_t *buf;
+    co_mtx_t mutex;
+    co_cond_t senders;
+    co_cond_t receivers;
+} co_chan_t;
+
+void co_chan_init(co_chan_t *, size_t capacity, int async);
+void co_chan_destroy(co_chan_t *);
+int co_chan_send(co_chan_t *, void *);
+int co_chan_receive(co_chan_t *, void **);
+void co_chan_close(co_chan_t *);
+
+static inline int co_chan_empty(co_chan_t *self) {
+    return self->size == 0;
+}
+
+static inline int co_chan_full(co_chan_t *self) {
+    return self->size == self->capacity;
+}
 
 #endif
