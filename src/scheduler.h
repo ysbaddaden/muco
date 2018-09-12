@@ -4,6 +4,7 @@
 #include "pcg_basic.h"
 #include "fiber.h"
 #include "queue.h"
+#include "spin.h"
 
 typedef struct scheduler {
     int color;
@@ -127,10 +128,11 @@ static void scheduler_resume(scheduler_t *self, fiber_t *fiber) {
     // whose context hasn't be saved yet, which can happen when a thread
     // enqueues then suspends a Fiber. swapcontext is thus responsible for
     // (un)setting fiber->resumeable when appropriate.
-    while (!fiber->resumeable) {
-        // LOG("not resumeable", self, fiber);
-        sched_yield();
-    }
+    spin_lock_long(&fiber->resumeable);
+    //while (!fiber->resumeable) {
+    //    // LOG("not resumeable", self, fiber);
+    //    sched_yield();
+    //}
     LOG("resume", self, fiber);
 
     if (current) {

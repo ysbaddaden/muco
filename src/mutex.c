@@ -3,7 +3,7 @@
 
 #include "muco.h"
 #include "muco/mutex.h"
-#include <sched.h>
+#include "spin.h"
 #include <stdlib.h>
 #include <time.h>
 
@@ -14,35 +14,8 @@
 #  define LOG(...)
 #endif
 
-#define SPIN_THRESHOLD (100)
-
-static inline void SPIN_LOCK(atomic_flag *x) {
-    // fast path:
-    if (!atomic_flag_test_and_set_explicit(x, memory_order_acquire)) {
-        return;
-    }
-
-    // constant busy loop:
-    unsigned int count = SPIN_THRESHOLD;
-    while (count--) {
-        if (!atomic_flag_test_and_set_explicit(x, memory_order_acquire)) {
-            return;
-        }
-    }
-
-    // TODO: consider an adaptive spinning strategy, for example random walk
-    // from "Empirical Studies of Competitive Spinning for a Shared-Memory
-    // Multiprocessor" (1991) page 5.
-
-    // blocking loop:
-    while (atomic_flag_test_and_set_explicit(x, memory_order_acquire)) {
-        sched_yield();
-    }
-}
-
-static inline void SPIN_UNLOCK(atomic_flag *x) {
-    atomic_flag_clear_explicit(x, memory_order_release);
-}
+#define SPIN_LOCK(x) spin_lock_flag(&(x)->busy);
+#define SPIN_UNLOCK(x) spin_unlock_flag(&(x)->busy);
 
 void co_mtx_init(co_mtx_t *m) {
     atomic_init(&m->held, 0);
@@ -65,7 +38,7 @@ int co_mtx_lock(co_mtx_t *m) {
     // need exclusive access to re-check 'held' then manipulate 'blocking'
     // based on the CAS result:
     int zero = 0;
-    SPIN_LOCK(&m->busy);
+    SPIN_LOCK(m);
 
     // must loop because a wakeup may be concurrential (e.g. co_cond_broadcast)
     // and another lock/trylock already acquired the lock:
@@ -80,16 +53,16 @@ int co_mtx_lock(co_mtx_t *m) {
         }
 
         // release exclusive access while current fiber is suspended:
-        SPIN_UNLOCK(&m->busy);
+        SPIN_UNLOCK(m);
         co_suspend();
 
         // need exclusive access (again):
         zero = 0;
-        SPIN_LOCK(&m->busy);
+        SPIN_LOCK(m);
     }
 
     // done.
-    SPIN_UNLOCK(&m->busy);
+    SPIN_UNLOCK(m);
     LOG("%p: co_mtx_lock (acquired=wakeup)\n", (void *)m);
     return 0;
 }
@@ -111,7 +84,7 @@ void co_mtx_unlock(co_mtx_t *m) {
     LOG("%p: co_mtx_unlock\n", (void *)m);
     // need exclusive access because we modify both 'held' and 'blocking' that
     // could introduce a race condition with lock:
-    SPIN_LOCK(&m->busy);
+    SPIN_LOCK(m);
 
     // removes the lock (assuming the current fiber holds the lock):
     m->held = 0;
@@ -120,10 +93,10 @@ void co_mtx_unlock(co_mtx_t *m) {
     fiber_t *fiber = m->blocking.head;
     if (fiber) {
         m->blocking.head = fiber->m_next;
-        SPIN_UNLOCK(&m->busy);
+        SPIN_UNLOCK(m);
         co_enqueue(fiber);
     } else {
-        SPIN_UNLOCK(&m->busy);
+        SPIN_UNLOCK(m);
     }
 }
 
@@ -139,7 +112,7 @@ void co_cond_wait(co_cond_t *restrict c, co_mtx_t *restrict m) {
     fiber_t *current = co_current();
 
     // need exclusive access to manipulate wait list:
-    SPIN_LOCK(&c->busy);
+    SPIN_LOCK(c);
 
     // queue current fiber into wait list:
     current->m_next = NULL;
@@ -148,7 +121,7 @@ void co_cond_wait(co_cond_t *restrict c, co_mtx_t *restrict m) {
     } else {
         c->waiting.tail = c->waiting.tail->m_next = current;
     }
-    SPIN_UNLOCK(&c->busy);
+    SPIN_UNLOCK(c);
 
     // release mutex lock, enqueueing a blocked fiber:
     // must always succeed (because current fiber holds the lock):
@@ -164,24 +137,24 @@ void co_cond_wait(co_cond_t *restrict c, co_mtx_t *restrict m) {
 void co_cond_signal(co_cond_t *c) {
     LOG("%p: co_cond_signal\n", (void *)c);
     // need exclusive access to manipulate wait list:
-    SPIN_LOCK(&c->busy);
+    SPIN_LOCK(c);
 
     // enqueue next waiting fiber (if any):
     fiber_t *fiber = c->waiting.head;
     if (fiber) {
         c->waiting.head = fiber->m_next;
-        SPIN_UNLOCK(&c->busy);
+        SPIN_UNLOCK(c);
 
         // TODO: or co_resume(fiber) ?
         co_enqueue(fiber);
     } else {
-        SPIN_UNLOCK(&c->busy);
+        SPIN_UNLOCK(c);
     }
 }
 
 void co_cond_broadcast(co_cond_t *c) {
     LOG("%p: co_cond_broadcast\n", (void *)c);
-    SPIN_LOCK(&c->busy);
+    SPIN_LOCK(c);
 
     // enqueue all waiting fibers:
     fiber_t *fiber = c->waiting.head;
@@ -192,7 +165,7 @@ void co_cond_broadcast(co_cond_t *c) {
 
     // clear linked list:
     c->waiting.head = NULL;
-    SPIN_UNLOCK(&c->busy);
+    SPIN_UNLOCK(c);
 }
 
 #endif
