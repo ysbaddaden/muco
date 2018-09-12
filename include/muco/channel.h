@@ -9,11 +9,14 @@ typedef struct {
 } co_chan_entry_t;
 
 typedef struct {
-    int async;
     int state;
+    int async;
+
     size_t capacity;
     size_t size;
+    size_t start;
     co_chan_entry_t *buf;
+
     co_mtx_t mutex;
     co_cond_t senders;
     co_cond_t receivers;
