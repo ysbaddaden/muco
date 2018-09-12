@@ -17,6 +17,8 @@ typedef struct fiber {
     fiber_main_t proc;
     fiber_exit_t link;
 
+    fiber_t *m_next;
+
     char *name;
 } fiber_t;
 

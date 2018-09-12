@@ -7,7 +7,7 @@
 #include <error.h>
 #include <time.h>
 
-#define COUNT (2000000ULL)
+#define COUNT (10000000ULL)
 
 static co_mtx_t mutex;
 static unsigned long long increment = 0;
@@ -52,10 +52,9 @@ int main(int argc, char *argv[]) {
     // should never happen:
     if (duration == 0) duration = 1;
 
-    printf("switch[%lu]: muco: %llu locks in %lld ms, %lld locks per second (increment=%llu)\n",
-            cocount, COUNT, duration, ((1000LL * COUNT) / duration), increment);
+    printf("switch[%d/%lu]: muco: %llu locks in %lld ms, %lld locks per second (increment=%llu)\n",
+            co_nprocs, cocount, COUNT, duration, ((1000LL * COUNT) / duration), increment);
 
-    co_mtx_destroy(&mutex);
     co_free();
     return 0;
 }

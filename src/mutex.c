@@ -1,156 +1,198 @@
-#include "muco.h"
-#include "ring.h"
+#ifndef MUCO_MUTEX_PRIV_H
+#define MUCO_MUTEX_PRIV_H
 
-#include <assert.h>
-#include <stdio.h>
-#include <stdatomic.h>
+#include "muco.h"
+#include "muco/mutex.h"
+#include <sched.h>
+#include <stdlib.h>
+#include <time.h>
 
 #if defined(DEBUG) || defined(MTX_DEBUG)
-#  define LOG(str, ...) dprintf(2, "fiber=%p self=" str, (void*)co_current(), __VA_ARGS__)
+#  include <stdio.h>
+#  define LOG(str, ...) dprintf(2, "fiber=%p [%s] self=" str, (void*)co_current(), co_current()->name, __VA_ARGS__)
 #else
 #  define LOG(...)
 #endif
 
-static atomic_flag busy = ATOMIC_FLAG_INIT;
+#define SPIN_THRESHOLD (100)
 
-#define SPIN_LOCK \
-    while(atomic_flag_test_and_set_explicit(&busy, memory_order_acquire)) {}
+static inline void SPIN_LOCK(atomic_flag *x) {
+    // fast path:
+    if (!atomic_flag_test_and_set_explicit(x, memory_order_acquire)) {
+        return;
+    }
 
-#define SPIN_UNLOCK \
-    atomic_flag_clear_explicit(&busy, memory_order_release)
-
-
-struct mutex {
-    atomic_bool held;
-    ring_t blocking;
-};
-
-struct cond {
-    ring_t waiting;
-};
-
-// init / deinit
-
-void co_mtx_init(struct mutex *self) {
-    atomic_init(&self->held, 0);
-    ring_initialize(&self->blocking);
-}
-
-void co_mtx_destroy(struct mutex *self) {
-    ring_finalize(&self->blocking);
-}
-
-
-// Thread-unsafe private API. These functions must only be called when SPIN_LOCK
-// has been acquired.
-
-static inline void mtx_lock(struct mutex *self) {
-    LOG("%p: mtx_lock\n", (void *)self);
-    assert(!ring_contains(&self->blocking, co_current()));
-
-    while (self->held) {
-        // TODO: forbid recursive lock (deadlock)
-        // TODO: allow *explicit* recursive lock with a counter
-        ring_push(&self->blocking, co_current());
-
-        SPIN_UNLOCK;
-        co_suspend();
-        SPIN_LOCK;
-
-        // assert(!ring_contains(&self->blocking, co_current()));
-        if (ring_contains(&self->blocking, co_current())) {
-            dprintf(2, "ERROR: self=%p mutex->blocking *already* contains fiber=%p\n", (void *)self, (void *)co_current());
-            abort();
+    // constant busy loop:
+    unsigned int count = SPIN_THRESHOLD;
+    while (count--) {
+        if (!atomic_flag_test_and_set_explicit(x, memory_order_acquire)) {
+            return;
         }
     }
-    self->held = 1;
+
+    // TODO: consider an adaptive spinning strategy, for example random walk
+    // from "Empirical Studies of Competitive Spinning for a Shared-Memory
+    // Multiprocessor" (1991) page 5.
+
+    // blocking loop:
+    while (atomic_flag_test_and_set_explicit(x, memory_order_acquire)) {
+        sched_yield();
+    }
 }
 
-static inline int mtx_trylock(struct mutex *self) {
-    LOG("%p: mtx_trylock\n", (void *)self);
-    assert(!ring_contains(&self->blocking, co_current()));
+static inline void SPIN_UNLOCK(atomic_flag *x) {
+    atomic_flag_clear_explicit(x, memory_order_release);
+}
 
-    if (self->held) {
-        return -1;
+void co_mtx_init(co_mtx_t *m) {
+    atomic_init(&m->held, 0);
+    m->busy = (atomic_flag)ATOMIC_FLAG_INIT;
+    m->blocking.head = NULL;
+    m->blocking.tail = NULL;
+}
+
+int co_mtx_lock(co_mtx_t *m) {
+    LOG("%p: co_mtx_lock\n", (void *)m);
+
+    // try to acquire lock (without spin lock):
+    if (co_mtx_trylock(m) == 0) {
+        LOG("%p: co_mtx_lock (acquired=trylock)\n", (void *)m);
+        return 0;
     }
-    self->held = 1;
+
+    fiber_t *current = co_current();
+
+    // need exclusive access to re-check 'held' then manipulate 'blocking'
+    // based on the CAS result:
+    int zero = 0;
+    SPIN_LOCK(&m->busy);
+
+    // must loop because a wakeup may be concurrential (e.g. co_cond_broadcast)
+    // and another lock/trylock already acquired the lock:
+    while (!atomic_compare_exchange_strong(&m->held, &zero, 1)) {
+        // push current fiber to blocking list:
+        current->m_next = NULL;
+
+        if (!m->blocking.head) {
+            m->blocking.tail = m->blocking.head = current;
+        } else {
+            m->blocking.tail = m->blocking.tail->m_next = current;
+        }
+
+        // release exclusive access while current fiber is suspended:
+        SPIN_UNLOCK(&m->busy);
+        co_suspend();
+
+        // need exclusive access (again):
+        zero = 0;
+        SPIN_LOCK(&m->busy);
+    }
+
+    // done.
+    SPIN_UNLOCK(&m->busy);
+    LOG("%p: co_mtx_lock (acquired=wakeup)\n", (void *)m);
     return 0;
 }
 
-static inline void mtx_unlock(struct mutex *self) {
-    LOG("%p: mtx_unlock\n", (void *)self);
-    assert(self->held);
-    self->held = 0;
+int co_mtx_trylock(co_mtx_t *m) {
+    //LOG("%p: co_mtx_trylock\n", (void *)m);
+    // try to acquire the lock, without exclusive access because we don't
+    // manipulate 'blocking' based on 'held' result.
+    int zero = 0;
+    if (atomic_compare_exchange_strong(&m->held, &zero, 1)) {
+        //LOG("%p: co_mtx_trylock (acquired)\n", (void *)m);
+        return 0;
+    }
+    //LOG("%p: co_mtx_trylock (failed)\n", (void *)m);
+    return -1;
+}
 
-    fiber_t *next = ring_shift(&self->blocking);
-    if (next) {
-        co_enqueue(next);
+void co_mtx_unlock(co_mtx_t *m) {
+    LOG("%p: co_mtx_unlock\n", (void *)m);
+    // need exclusive access because we modify both 'held' and 'blocking' that
+    // could introduce a race condition with lock:
+    SPIN_LOCK(&m->busy);
+
+    // removes the lock (assuming the current fiber holds the lock):
+    m->held = 0;
+
+    // wakeup next blocking fiber (if any):
+    fiber_t *fiber = m->blocking.head;
+    if (fiber) {
+        m->blocking.head = fiber->m_next;
+        SPIN_UNLOCK(&m->busy);
+        co_enqueue(fiber);
+    } else {
+        SPIN_UNLOCK(&m->busy);
     }
 }
 
-
-// thread-safe public API:
-
-void co_mtx_lock(struct mutex *self) {
-    LOG("%p: co_mtx_lock\n", (void *)self);
-    SPIN_LOCK;
-    mtx_lock(self);
-    SPIN_UNLOCK;
+void co_cond_init(co_cond_t *c) {
+    c->busy = (atomic_flag)ATOMIC_FLAG_INIT;
+    c->waiting.head = NULL;
+    c->waiting.tail = NULL;
 }
 
-int co_mtx_trylock(struct mutex *self) {
-    LOG("%p: co_mtx_trylock\n", (void *)self);
-    SPIN_LOCK;
-    int res = mtx_trylock(self);
-    SPIN_UNLOCK;
-    return res;
-}
+void co_cond_wait(co_cond_t *restrict c, co_mtx_t *restrict m) {
+    LOG("%p: co_cond_wait(%p)\n", (void *)c, (void *)m);
+    // assert(m->held);
+    fiber_t *current = co_current();
 
-void co_mtx_unlock(struct mutex *self) {
-    LOG("%p: co_mtx_unlock\n", (void *)self);
-    SPIN_LOCK;
-    mtx_unlock(self);
-    SPIN_UNLOCK;
-}
+    // need exclusive access to manipulate wait list:
+    SPIN_LOCK(&c->busy);
 
-void co_cond_init(struct cond *self) {
-    ring_initialize(&self->waiting);
-}
+    // queue current fiber into wait list:
+    current->m_next = NULL;
+    if (!c->waiting.head) {
+        c->waiting.tail = c->waiting.head = current;
+    } else {
+        c->waiting.tail = c->waiting.tail->m_next = current;
+    }
+    SPIN_UNLOCK(&c->busy);
 
-void co_cond_destroy(struct cond *self) {
-    ring_finalize(&self->waiting);
-}
+    // release mutex lock, enqueueing a blocked fiber:
+    // must always succeed (because current fiber holds the lock):
+    co_mtx_unlock(m);
 
-void co_cond_wait(struct cond *self, struct mutex *m) {
-    LOG("%p: co_cond_wait(%p)\n", (void *)self, (void *)m);
-    SPIN_LOCK;
-
-    assert(m->held);
-    mtx_unlock(m);
-    ring_push(&self->waiting, co_current());
-
-    SPIN_UNLOCK;
+    // suspend execution of current fiber:
     co_suspend();
 
+    // must re-acquire the mutex lock to continue:
     co_mtx_lock(m);
 }
 
-void co_cond_signal(struct cond *self) {
-    LOG("%p: co_cond_signal\n", (void *)self);
-    SPIN_LOCK;
-    fiber_t *next = ring_shift(&self->waiting);
-    if (next) {
-        co_enqueue(next);
+void co_cond_signal(co_cond_t *c) {
+    LOG("%p: co_cond_signal\n", (void *)c);
+    // need exclusive access to manipulate wait list:
+    SPIN_LOCK(&c->busy);
+
+    // enqueue next waiting fiber (if any):
+    fiber_t *fiber = c->waiting.head;
+    if (fiber) {
+        c->waiting.head = fiber->m_next;
+        SPIN_UNLOCK(&c->busy);
+
+        // TODO: or co_resume(fiber) ?
+        co_enqueue(fiber);
+    } else {
+        SPIN_UNLOCK(&c->busy);
     }
-    SPIN_UNLOCK;
 }
 
-void co_cond_broadcast(struct cond *self) {
-    LOG("%p: co_cond_broadcast\n", (void *)self);
-    SPIN_LOCK;
-    fiber_t *next;
-    while ((next = ring_shift(&self->waiting))) {
-        co_enqueue(next);
+void co_cond_broadcast(co_cond_t *c) {
+    LOG("%p: co_cond_broadcast\n", (void *)c);
+    SPIN_LOCK(&c->busy);
+
+    // enqueue all waiting fibers:
+    fiber_t *fiber = c->waiting.head;
+    while (fiber) {
+        co_enqueue(fiber);
+        fiber = fiber->m_next;
     }
-    SPIN_UNLOCK;
+
+    // clear linked list:
+    c->waiting.head = NULL;
+    SPIN_UNLOCK(&c->busy);
 }
+
+#endif

@@ -20,6 +20,9 @@ switch: samples/switch.o libmuco.a
 mutex: samples/mutex.o libmuco.a
 	$(CC) samples/mutex.o -o mutex $(LDFLAGS)
 
+queue: samples/queue.o libmuco.a
+	$(CC) samples/queue.o -o queue $(LDFLAGS)
+
 channel: samples/channel.o libmuco.a
 	$(CC) samples/channel.o -o channel $(LDFLAGS)
 

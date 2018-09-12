@@ -34,9 +34,6 @@ void co_chan_init(chan_t *self, size_t capacity, int async) {
 
 void co_chan_destroy(chan_t *self) {
     free(self->buf);
-    co_mtx_destroy(&self->mutex);
-    co_cond_destroy(&self->senders);
-    co_cond_destroy(&self->receivers);
 }
 
 int co_chan_send(chan_t *self, void *value) {
@@ -132,6 +129,8 @@ int co_chan_receive(chan_t *self, void **value) {
 }
 
 void co_chan_close(chan_t *self) {
+    if (self->state) return;
+
     LOG("%p: co_chan_close\n", (void *)self);
     //LOG("close: locking\n");
     co_mtx_lock(&self->mutex);

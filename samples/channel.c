@@ -8,7 +8,7 @@
 
 #define COUNT (1000000ULL)
 
-atomic_ulong done;
+atomic_ulong gdone, cdone;
 long count;
 struct timespec start, stop;
 
@@ -23,9 +23,8 @@ void generate() {
         }
     }
 
-    if (atomic_fetch_sub(&done, 1) == 1) {
+    if (atomic_fetch_sub(&gdone, 1) == 1) {
         co_chan_close(&chan);
-        co_break();
     }
 }
 
@@ -38,8 +37,9 @@ void consume() {
         }
     }
 
-    printf("done: %lu\n", i);
-    // co_break();
+    if (atomic_fetch_sub(&cdone, 1) == 1) {
+        co_break();
+    }
 }
 
 int main(int argc, char **argv) {
@@ -54,7 +54,8 @@ int main(int argc, char **argv) {
 
     cocount = gcount + ccount;
     count = COUNT / gcount;
-    atomic_init(&done, gcount);
+    atomic_init(&gdone, gcount);
+    atomic_init(&cdone, ccount);
 
     co_init(co_procs());
 
@@ -79,8 +80,8 @@ int main(int argc, char **argv) {
     // should never happen:
     if (duration == 0) duration = 1;
 
-    printf("chan[%lu]: muco: %llu messages in %lld ms, %lld messages per second\n",
-            cocount, COUNT, duration, ((1000LL * COUNT) / duration));
+    printf("channel[%d/%lu]: muco: %llu messages in %lld ms, %lld messages per second\n",
+            co_nprocs, cocount, COUNT, duration, ((1000LL * COUNT) / duration));
 
     co_chan_destroy(&chan);
     co_free();

@@ -47,8 +47,8 @@ int main(int argc, char *argv[]) {
     // should never happen:
     if (duration == 0) duration = 1;
 
-    printf("switch[%lu]: muco: %llu yields in %lld ms, %lld yields per second\n",
-            cocount, COUNT, duration, ((1000LL * COUNT) / duration));
+    printf("switch[%d/%lu]: muco: %llu yields in %lld ms, %lld yields per second\n",
+            co_nprocs, cocount, COUNT, duration, ((1000LL * COUNT) / duration));
     co_free();
 
     return 0;
