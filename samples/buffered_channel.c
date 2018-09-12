@@ -5,6 +5,11 @@
 
 static co_chan_t chan;
 
+// need globals because receiver fiber may outlive sending fiber:
+static long i = 1;
+static long j = 2;
+static long k = 3;
+
 void consumer() {
     long *m;
 
@@ -15,10 +20,6 @@ void consumer() {
 }
 
 void producer() {
-    long i = 1;
-    long j = 2;
-    long k = 3;
-
     co_chan_send(&chan, &i);
     co_chan_send(&chan, &j);
     co_chan_send(&chan, &k);
@@ -29,9 +30,9 @@ void producer() {
 int main() {
     co_init(co_procs());
 
-    // channel is unbuffered (1 slot) and synchronous (sender waits for receiver
-    // to have received the value):
-    co_chan_init(&chan, 1, 0);
+    // channel is buffered (1 slot) and asynchronous (sender doesn't wait for
+    // receiver to have received the value):
+    co_chan_init(&chan, 2, 1);
 
     co_spawn(consumer);
     co_spawn(producer);

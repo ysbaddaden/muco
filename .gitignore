@@ -2,7 +2,10 @@ a.out
 *.o
 *.a
 *.gch
-/main
-/switch
-/mutex
-/channel
+/samples/main
+/samples/channel
+/samples/buffered_channel
+/benchmarks/switch
+/benchmarks/mutex
+/benchmarks/queue
+/benchmarks/channel

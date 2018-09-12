@@ -11,22 +11,9 @@ all: libmuco.a
 libmuco.a: $(OBJECTS)
 	$(AR) -cr libmuco.a $(OBJECTS)
 
-main: samples/main.o libmuco.a
-	$(CC) samples/main.o -o main $(LDFLAGS)
-
-switch: samples/switch.o libmuco.a
-	$(CC) samples/switch.o -o switch $(LDFLAGS)
-
-mutex: samples/mutex.o libmuco.a
-	$(CC) samples/mutex.o -o mutex $(LDFLAGS)
-
-queue: samples/queue.o libmuco.a
-	$(CC) samples/queue.o -o queue $(LDFLAGS)
-
-channel: samples/channel.o libmuco.a
-	$(CC) samples/channel.o -o channel $(LDFLAGS)
-
 clean: .phony
-	rm -f libmuco.a src/*.o samples/*.o main switch mutex channel
+	rm -f libmuco.a src/*.o samples/*.o
+	cd samples && make clean
+	cd benchmarks && make clean
 
 .phony:
