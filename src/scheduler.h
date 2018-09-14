@@ -33,6 +33,12 @@ static void LOG(char *action, scheduler_t *scheduler, fiber_t *fiber) {
 #define LOG(action, scheduler, fiber)
 #endif
 
+static int co_park_count = 0;
+static pthread_mutex_t co_park_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t co_park_cond = PTHREAD_COND_INITIALIZER;
+static void scheduler_park();
+static void scheduler_unpark();
+
 static void scheduler_initialize(scheduler_t *self, int color);
 static void scheduler_finalize(scheduler_t *self);
 
@@ -118,6 +124,9 @@ static void scheduler_free_pending(scheduler_t *self, int count) {
 static void scheduler_enqueue(scheduler_t *self, fiber_t *fiber) {
     LOG("enqueue", self, fiber);
     queue_push_bottom(&self->runnables, (void *)fiber);
+
+    // resume a parked thread (if any):
+    scheduler_unpark();
 }
 
 static void scheduler_resume(scheduler_t *self, fiber_t *fiber) {
@@ -129,10 +138,6 @@ static void scheduler_resume(scheduler_t *self, fiber_t *fiber) {
     // enqueues then suspends a Fiber. swapcontext is thus responsible for
     // (un)setting fiber->resumeable when appropriate.
     spin_lock_long(&fiber->resumeable);
-    //while (!fiber->resumeable) {
-    //    // LOG("not resumeable", self, fiber);
-    //    sched_yield();
-    //}
     LOG("resume", self, fiber);
 
     if (current) {
@@ -201,10 +206,9 @@ static fiber_t *scheduler_steal_once(scheduler_t *self) {
 static fiber_t *scheduler_steal_loop(scheduler_t *self) {
     fiber_t *fiber;
 
-    // FIXME: loop for a while (e.g. 100 iterations) then suspend thread and
-    //        find a solution to resume a thread when fibers are queued and
-    //        there are no thief thread.
-    while (1) {
+    // try to steal a fiber from a random scheduler:
+    int iterations = 100;
+    while (iterations--) {
         sched_yield();
 
         if (!co_running) {
@@ -217,6 +221,24 @@ static fiber_t *scheduler_steal_loop(scheduler_t *self) {
             return fiber;
         }
     }
+
+    // nothing to steal:
+    return NULL;
+}
+
+static void scheduler_park() {
+    pthread_mutex_lock(&co_park_mtx);
+    co_park_count++;
+    pthread_cond_wait(&co_park_cond, &co_park_mtx);
+    co_park_count--;
+    pthread_mutex_unlock(&co_park_mtx);
+}
+
+static void scheduler_unpark() {
+    if (!co_park_count) return;
+    pthread_mutex_lock(&co_park_mtx);
+    pthread_cond_signal(&co_park_cond);
+    pthread_mutex_unlock(&co_park_mtx);
 }
 
 static void *scheduler_start(void *data) {
@@ -235,6 +257,9 @@ static void *scheduler_start(void *data) {
 
         if (fiber) {
             scheduler_resume(scheduler, fiber);
+        } else if (co_running) {
+            // nothing to steal: pause thread
+            scheduler_park();
         }
     }
 
