@@ -1,6 +1,18 @@
 #ifndef MUCO_QUEUE_PRIV_H
 #define MUCO_QUEUE_PRIV_H
 
+/**
+ * Thread-safe non-blocking queue for work-stealing schedulers.
+ *
+ * Based on:
+ *
+ * - "Scheduling Multithreaded Computations by Work Stealing" (2001) by
+ *   Nimar S. Arora, Robert D. Blumofe and C. Greg Plaxton.
+ *
+ * - "Verification of a Concurrent Deque Implementation" (1999) by
+ *   Robert D. Blumofe, C. Greg Plaxton and Sandip Ray.
+ */
+
 #include "config.h"
 #include <stdatomic.h>
 
